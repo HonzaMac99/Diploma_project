@@ -1,0 +1,90 @@
+# ======================
+# Python basics
+# ======================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ======================
+# IDEs / Editors
+# ======================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ======================
+# Jupyter
+# ======================
+.ipynb_checkpoints/
+
+# ======================
+# OS files
+# ======================
+.DS_Store
+Thumbs.db
+
+# ======================
+# Logs & temp files
+# ======================
+*.log
+tmp/
+temp/
+
+# ======================
+# ML / DL artifacts
+# ======================
+# Model checkpoints & weights
+*.h5
+*.hdf5
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.pb
+saved_model/
+checkpoints/
+
+# TensorFlow logs
+logs/
+tensorboard/
+runs/
+
+# ======================
+# Datasets (IMPORTANT)
+# ======================
+data/
+datasets/
+*.tfrecord
+*.npz
+*.npy
+
+# ======================
+# OpenCV / media
+# ======================
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.jpg
+*.png
+*.jpeg
+
+# ======================
+# Environment & secrets
+# ======================
+.env
+*.env
