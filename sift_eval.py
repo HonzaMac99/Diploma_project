@@ -202,7 +202,7 @@ def print_scores(dataset_stats):
     # print(f"Average time: {avg_time}")
 
 
-def show(sift_scores, img_idxs, interactive=False):
+def show(scores, img_idxs, interactive=False):
     global fig, axes
 
     assert len(img_idxs) == 2, f"Size of img idxs has to be 2: {img_idxs}"
@@ -218,11 +218,11 @@ def show(sift_scores, img_idxs, interactive=False):
         ax.imshow(img)
         ax.axis("off")
 
-    sift_score = sift_scores[img_idxs[0]][img_idxs[1]]
+    score = scores[img_idxs[0]][img_idxs[1]]
 
     n_images = len(images) if type(MAX_IMAGES) is not int else MAX_IMAGES
     fig.suptitle(
-        f"SIFT score: {sift_score:.2f}   [{img_idxs[0]+1}, {img_idxs[1]+1} | {n_images}]",
+        f"SIFT score: {score:.2f}   [{img_idxs[0]+1}, {img_idxs[1]+1} | {n_images}]",
         fontsize=14
     )
     if interactive:

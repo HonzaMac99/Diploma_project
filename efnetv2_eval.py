@@ -204,11 +204,11 @@ def show(sift_scores, img_idxs, interactive=False):
         ax.imshow(img)
         ax.axis("off")
 
-    sift_score = sift_scores[img_idxs[0]][img_idxs[1]]
+    score = sift_scores[img_idxs[0]][img_idxs[1]]
 
     n_images = len(images) if type(MAX_IMAGES) is not int else MAX_IMAGES
     fig.suptitle(
-        f"EfficientNetV2-B1 score: {sift_score:.2f}   [{img_idxs[0]+1}, {img_idxs[1]+1} | {n_images}]",
+        f"EfficientNetV2-B1 score: {score:.2f}   [{img_idxs[0]+1}, {img_idxs[1]+1} | {n_images}]",
         fontsize=14
     )
     if interactive:
@@ -219,7 +219,7 @@ def show(sift_scores, img_idxs, interactive=False):
         plt.pause(0.001)
 
 
-def on_key(event, sift_scores):
+def on_key(event, scores):
     global img_idx_1, img_idx_2
     n_images = len(images) if type(MAX_IMAGES) is not int else MAX_IMAGES
     if event.key == "d":
@@ -235,7 +235,7 @@ def on_key(event, sift_scores):
         return
 
     img_idxs = (img_idx_1, img_idx_2)
-    show(sift_scores, img_idxs, interactive=True)
+    show(scores, img_idxs, interactive=True)
 
 
 def save_json_versioned(path: Path, idx, data: dict):

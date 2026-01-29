@@ -6,6 +6,7 @@ import skimage
 from PIL import Image, ImageOps
 import piexif
 import time
+from tqdm import tqdm
 import os
 import json
 from pathlib import Path
@@ -14,7 +15,9 @@ import torchvision.models as models
 import torchvision.transforms as transforms
 
 
-PHOTO_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/"
+IMAGE_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
+MODEL_PATH = "data/model.pth"
 IMG_NUM_RES = 1    # orig_res = [3000 x 4000] --> [224, 244] (fixed nima input size)
 OVERRIDE_JSON = True
 SAVE_SCORE_EXIF = False
@@ -22,13 +25,7 @@ SAVE_SCORE_EXIF = False
 SHOW_IMAGES = True
 MAX_IMAGES = None # maximum number of images to process
 
-dataset_path = os.path.join(PHOTO_PATH, "selected_r30")
-images = sorted(f for f in os.listdir(dataset_path)
-                if f.lower().endswith((".png", ".jpg", ".jpeg")))
-
-img_idx = 0
-fig, ax = plt.subplots()
-model = None
+_nima_model = None
 
 class NIMA(nn.Module):
     """Neural IMage Assessment model by Google"""
@@ -71,13 +68,55 @@ def build_nima_model(model_pth: str, cuda: bool = True, seed: int | None = None)
     return model, device
 
 
+def get_nima_model():
+    global _nima_model
+    if _nima_model is None:
+        model_path = MODEL_PATH
+        _nima_model, _ = build_nima_model(model_path)
+    return _nima_model
+
+### Function without printing and plotting for main script #############################################################
+def compute_nima_scores(dataset_path : Path, img_files : list, cuda=True):
+    nima_model = get_nima_model()
+    device = torch.device("cuda" if torch.cuda.is_available() and cuda else "cpu")
+    scores = []
+
+    nima_img_transform = transforms.Compose([
+        transforms.Resize(256),
+        transforms.RandomCrop(224),           # Resize and crop (as in paper)
+        transforms.ToTensor(),                # Convert to tensor and scale [0,255] -> [0,1]
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])
+
+    # iterator = tqdm(img_files, desc="BRISQUE", unit="img") if show_progress else img_files
+    for img_name in tqdm(img_files, desc="NIMA", unit="img"):
+        img_path = dataset_path / img_name
+
+        img = Image.open(img_path)
+        img = ImageOps.exif_transpose(img)  # apply EXIF orientation
+
+        img = nima_img_transform(img)  # transform for Nima
+        img = img.unsqueeze(dim=0)
+        img = img.to(device)
+
+        with torch.no_grad():
+            out_f, out_class = nima_model(img)
+
+        probs = out_class.view(-1) # flatten to [10]
+        indices = torch.arange(1, 11, dtype=probs.dtype, device=probs.device) # class indices: 1..10
+        nima_score = float((probs * indices).sum()) # weighted sum
+
+        scores.append(nima_score)
+
+    return scores
+########################################################################################################################
+
+
 def nima_eval(img, cuda = True):
     start_t = time.time()
-    global model
+    nima_model = get_nima_model()
     device = torch.device("cuda" if torch.cuda.is_available() and cuda else "cpu")
-    if model is None:
-        model_path = "data/model.pth"
-        model, _ = build_nima_model(model_path, cuda)
 
     # for technical quality transform use   (skimage)
     # for aesthetic quality transform use   (torchvision)
@@ -92,17 +131,18 @@ def nima_eval(img, cuda = True):
     # possible alternatives to try:
     # (1) transforms.Resize((224, 224)),      # Resize directly to 224x224
     # (2) transforms.CenterCrop(224),         # Deterministic crop instead to random
+    # todo: try these and put into report
 
     img = nima_img_transform(img)  # transform for Nima
     img = img.unsqueeze(dim=0)
     img = img.to(device)
 
     with torch.no_grad():
-        out_f, out_class = model(img)
-    out_class = out_class.view(10, 1)
-    nima_score = 0
-    for i, cls in enumerate(out_class, 1):
-        nima_score += i * float(cls)
+        out_f, out_class = nima_model(img)
+
+    probs = out_class.view(-1) # flatten to [10]
+    indices = torch.arange(1, 11) # class indices: 1..10
+    nima_score = float((probs * indices).sum()) # weighted sum
 
     end_t = time.time()
     nima_time = end_t-start_t
@@ -333,6 +373,28 @@ def save_json_versioned(path: Path, idx, data: dict):
 
 
 if __name__ == "__main__":
+    default_path = Path(DATASET_PATH) / "selected_r30" # os.path.join(PHOTOS_PATH, "selected_r30")
+    # default_path = Path("/home/honzamac/Edu/m5/Projekt_D/datasets/LIVEwild/Images/trainingImages/")
+    print(f"Dataset_path: {default_path}")
+    # input_str = input("Dataset path: ")
+    # input_path = Path(input_str).resolve()
+
+    dataset_path = default_path
+    # dataset_path = input_path if input_str != "" else default_path
+
+    img_files = sorted(
+        img_file for img_file in dataset_path.iterdir()
+        if img_file.is_file() and img_file.suffix.lower() in IMAGE_EXTS
+    )
+    assert len(img_files) > 0, "No images loaded!"
+
+    if type(MAX_IMAGES) is int:
+        max_idx = min(len(img_files), MAX_IMAGES)
+        img_files = img_files[:max_idx]
+    n_images = len(img_files)
+
+    img_idx = 0
+    fig, ax = plt.subplots()
 
     dataset_stats = {}
     file_version_idx = 0

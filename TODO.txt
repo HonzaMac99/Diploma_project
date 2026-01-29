@@ -12,7 +12,7 @@
 
 Side quests:
 a) replace all os paths with pathlib
-b)
+b) put images into batches for faster computation
 
 
 

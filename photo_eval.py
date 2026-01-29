@@ -1,29 +1,24 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 from PIL import Image, ImageOps
 from pathlib import Path
 import os
 import json
 import piexif
 
-# Todo: import brisque_eval (or brisque_utils?)
-# Todo: import nima_eval
+from brisque_eval import compute_brisque_scores
+from nima_eval import compute_nima_scores
+
 # Todo: import sift_eval
 # Todo: import clip_eval
 
-PHOTOS_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/"
+IMAGE_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
+
+MAX_IMAGES = 3
 IMG_NUM_RES = 6    # orig_res = [3000 x 4000] --> [375 x 500] (4)
 SAVE_SCORE_EXIF = False
-
-
-dataset_path = os.path.join(PHOTOS_PATH, "selected_r30")
-images = sorted(f for f in os.listdir(dataset_path)
-                if f.lower().endswith((".png", ".jpg", ".jpeg")))
-
-img_idx = 0
-fig, ax = plt.subplots()
-obj = None
-
 
 def save_json_versioned(path: Path, data: dict):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -87,36 +82,50 @@ def load_exif_comment(img_path):
         return "No EXIF data"
 
 
-def show(b_scores_resols, interactive=False):
-    global ax
-    ax.clear()
-    img_path = os.path.join(dataset_path, images[img_idx])
+def show_img_scores(scores, img_idxs, interactive=False):
+    global fig, axes
+    global img_files
 
-    # img1 = skimage.io.imread(img_path)
-    img = Image.open(img_path)
-    img = ImageOps.exif_transpose(img)  # apply EXIF orientation
-    img = np.array(img)
+    assert len(img_idxs) == 2, f"Size of img idxs has to be 2: {img_idxs}"
+    idx1, idx2 = img_idxs
+    keys_list = list(scores.keys())
+    n_images = len(img_files)
 
-    b_score = b_scores_resols[0]
+    # Remove old texts from figure (pair scores, info)
+    if not hasattr(fig, 'custom_texts'):
+        fig.custom_texts = []
+    for txt in fig.custom_texts:
+        txt.remove()
+    fig.custom_texts = []
 
-    if SAVE_SCORE_EXIF:
-        save_exif_comment(img_path, b_score)
-    exif_text = "EXIF: " + load_exif_comment(img_path)
+    for img_idx, ax in zip(img_idxs, axes):
+        img_path = os.path.join(dataset_path, img_files[img_idx])
 
-    ax.imshow(img)
-    ax.set_title(f"Brisque score [{img_idx+1}/{len(b_scores)}]: {b_score:.2f}")
-    ax.axis("off")
+        img = Image.open(img_path)
+        img = ImageOps.exif_transpose(img)  # apply EXIF orientation
+        img = np.array(img)
 
-    # Text under the image
-    ax.text(
-        0.5, -0.02,
-        exif_text,
-        transform=ax.transAxes,
-        ha="center",
-        va="top",
-        fontsize=12,
-        wrap=True
-    )
+        ax.clear()
+        ax.imshow(img)
+        ax.axis("off")
+
+        x_pos, y_pos = 0.05, 0.05
+        score_text = (f"{keys_list[0]}: {scores[keys_list[0]][img_idx]:.2f},  "
+                      f"{keys_list[1]}: {scores[keys_list[1]][img_idx]:.2f}")
+
+        ax.text(x_pos, y_pos, score_text,
+                color='white', fontsize=8, fontweight='bold',
+                bbox=dict(facecolor='black', alpha=0.6, pad=3),
+                transform=ax.transAxes)
+
+    fig.subplots_adjust(top=0.8)  # leave space for text
+    t1 = fig.text(0.5, 0.95, f"{keys_list[2]}: {scores[keys_list[2]][idx1][idx2]}", ha='center', fontsize=14, fontweight='bold')
+    t2 = fig.text(0.5, 0.90, f"{keys_list[3]}: {scores[keys_list[3]][idx1][idx2]}", ha='center', fontsize=14, fontweight='bold')
+    t3 = fig.text(0.5, 0.05, f"[{idx1+1}, {idx2+1} | {n_images}]", ha='center', fontsize=14, fontweight='bold')
+    fig.custom_texts = [t1, t2, t3]
+
+    fig.subplots_adjust(top=0.95, bottom=0.1)
+    plt.tight_layout(pad=2.0)
 
     if interactive:
         fig.canvas.draw_idle()
@@ -126,35 +135,63 @@ def show(b_scores_resols, interactive=False):
         plt.pause(0.001)
 
 
-def on_key(event, b_scores):
-    global img_idx
+def on_key(event, scores):
+    global img_files
+    global img_idx_1, img_idx_2, n_images
+
     if event.key == "d":
-        img_idx = (img_idx + 1) % len(b_scores)
+        img_idx_1 = (img_idx_1 + 1) % n_images
     elif event.key == "a":
-        img_idx = (img_idx - 1) % len(b_scores)
+        img_idx_1 = (img_idx_1 - 1) % n_images
+    elif event.key == "w":
+        img_idx_2 = (img_idx_2 + 1) % n_images
+    elif event.key == "s":
+        img_idx_2 = (img_idx_2 - 1) % n_images
     elif event.key == "q":
         plt.close(fig)
         return
-    show(b_scores[img_idx], interactive=True)
+
+    img_idxs = (img_idx_1, img_idx_2)
+    show_img_scores(scores, img_idxs, interactive=True)
 
 
 if __name__ == "__main__":
 
-    file_idx = 0
-    file_name = "brisque_stats"
+    default_path = Path(DATASET_PATH) / "selected_r30" # os.path.join(PHOTOS_PATH, "selected_r30")
+    # default_path = Path("/home/honzamac/Edu/m5/Projekt_D/datasets/LIVEwild/Images/trainingImages/")
+    print(f"Dataset_path: {default_path}")
+    # input_str = input("Dataset path: ")
+    # input_path = Path(input_str).resolve()
 
-    f_suffix = "" if file_idx == 0 else f"_{file_idx}"
-    imgs_stats_path = Path(f"data/{file_name}{f_suffix}.json")
-    imgs_stats = {}
-    if imgs_stats_path.exists():
-        with open(imgs_stats_path, "r", encoding="utf-8") as f:
-            imgs_stats = json.load(f)
-        print_scores(imgs_stats)
-    else:
-        imgs_stats = compute_scores()
+    dataset_path = default_path
+    # dataset_path = input_path if input_str != "" else default_path
 
-    img_idx = 0
-    b_scores = [x["data"]["scores_rot"] for x in imgs_stats["statistics"]]
-    fig.canvas.mpl_connect("key_press_event", lambda event: on_key(event, b_scores))
-    show(b_scores[img_idx])
+    img_files = sorted(
+        img_file for img_file in dataset_path.iterdir()
+        if img_file.is_file() and img_file.suffix.lower() in IMAGE_EXTS
+    )
+    assert len(img_files) > 0, "No images loaded!"
+
+    if type(MAX_IMAGES) is int:
+        max_idx = min(len(img_files), MAX_IMAGES)
+        img_files = img_files[:max_idx]
+    n_images = len(img_files)
+
+    img_idx_1 = 0
+    img_idx_2 = 0
+    fig, axes = plt.subplots(1, 2)
+
+    # todo: brisque, nima - loading from files
+    # todo: sift, efnetv2
+    scores = {
+        "brisque":  compute_brisque_scores(dataset_path, img_files),
+        "nima":     compute_nima_scores(dataset_path, img_files),
+        "sift":     np.random.normal(loc=50.0, scale=10.0, size=(n_images, n_images)).tolist(),
+        "efnetv2":  np.random.normal(loc=50.0, scale=10.0, size=(n_images, n_images)).tolist()
+    }
+    # np.random.normal(loc=50.0, scale=10.0, size=(n_images)).tolist()
+
+    mpl.rcParams['keymap.save'] = [] # set w,s keys as a custom shortcuts to change the second image
+    fig.canvas.mpl_connect("key_press_event", lambda event: on_key(event, scores))
+    show_img_scores(scores, (img_idx_1, img_idx_2))
     plt.show()

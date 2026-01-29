@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+import torch.nn.functional as F
 import skimage
 from PIL import Image, ImageOps
 import piexif
@@ -10,8 +11,11 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 from brisque import BRISQUE
+from tqdm import tqdm
 
-PHOTO_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/"
+import cv2
+
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/"
 IMG_NUM_RES = 6    # orig_res = [3000 x 4000] --> [375 x 500] (4)
 OVERRIDE_JSON = False
 SAVE_SCORE_EXIF = True
@@ -19,15 +23,32 @@ SAVE_SCORE_EXIF = True
 SHOW_IMAGES = True
 MAX_IMAGES = 3 # maximum number of images to process
 
-dataset_path = os.path.join(PHOTO_PATH, "selected_r30")
-images = sorted(f for f in os.listdir(dataset_path)
-                if f.lower().endswith((".png", ".jpg", ".jpeg")))
-
-img_idx = 0
-fig, ax = plt.subplots()
-
 _brisque_obj = None
 
+### Function without printing and plotting for main script #############################################################
+def compute_brisque_scores(dataset_path : Path, img_files : list):
+    brisque_obj = get_brisque()
+    scores = []
+
+    # iterator = tqdm(img_files, desc="BRISQUE", unit="img") if show_progress else img_files
+    for img_name in tqdm(img_files, desc="BRISQUE", unit="img"):
+        img_path = dataset_path / img_name
+
+        img = Image.open(img_path)
+        img = ImageOps.exif_transpose(img)  # apply EXIF orientation
+        img = np.array(img)
+
+        dsampl_lvl = 3  # 1 -> 6s; 2 -> 1.65s; 3 -> 0.5s; 4 -> 0.16s per image
+        img_new_h = img.shape[0] // 2 ** dsampl_lvl
+        img_new_w = img.shape[1] // 2 ** dsampl_lvl
+        img_norm = img.astype(np.float32) / 255.0 # torch.tensor(img) / 255.0
+        img_tfd = skimage.transform.resize_local_mean(img_norm, output_shape=[img_new_h, img_new_w])
+        # local mean is the simplest method that KEEPS STATISTICS, so the IQA is more or less unbiased
+        # we don't use cv2.resize, because interpolation can create artifacts and bias the img statistics
+
+        scores.append(brisque_obj.score(img_tfd))
+    return scores
+########################################################################################################################
 
 def get_brisque():
     global _brisque_obj
@@ -40,17 +61,33 @@ def brisque_eval(img):
     # plt.ioff()
 
     brisque_obj = get_brisque()
-    img_h, img_w, _ = img.shape
     b_scores_resls = []
     times = []
     for i in range(IMG_NUM_RES):
-        img_new_h = img_h // 2**i
-        img_new_w = img_w // 2**i
-        img_tfd = skimage.transform.resize_local_mean(torch.tensor(img) / 255.0,
-                                                      output_shape=[img_new_h, img_new_w])
+        start_t = time.time()
+        img_new_h = img.shape[0] // 2**i
+        img_new_w = img.shape[1] // 2**i
+        img_norm = img.astype(np.float32) / 255.0
+
+        # todo: check all transformations
+        tf_option = 1
+        if tf_option == 1: # local mean from skimage, keeps statistics
+            img_tfd = skimage.transform.resize_local_mean(img_norm, output_shape=[img_new_h, img_new_w])
+            # img_tfd = skimage.transform.resize_local_mean(img.astype(np.float32) / 255.0, output_shape=[img_new_h, img_new_w])
+        elif tf_option == 2: # pooling with np.mean
+            img_tfd = skimage.measure.block_reduce(img_norm, block_size=(2**i, 2**i, 1), func=np.mean)
+        elif tf_option == 3: # allegedly the FASTEST
+            img_tfd = cv2.resize(img_norm, (img_new_w, img_new_h), interpolation=cv2.INTER_AREA)
+            # img_tfd = cv2.resize(img.astype(np.float32), (img_new_w, img_new_h))
+        elif tf_option == 4:
+            img_t = torch.tensor(img_norm).permute(2, 0, 1).unsqueeze(0) # (1, C, H, W)
+            img_tfd = F.avg_pool2d(img_t, kernel_size=2**i)
+            img_tfd = img_tfd.squeeze(0).permute(1, 2, 0).numpy()
+        else:
+            exit(-1)
+
         img_tfd = np.asarray(img_tfd)
 
-        start_t = time.time()
         b_scores_resls.append(brisque_obj.score(img_tfd))
         end_t = time.time()
         times.append(end_t-start_t)
@@ -294,6 +331,28 @@ def save_json_versioned(path: Path, idx, data: dict):
 
 
 if __name__ == "__main__":
+    default_path = Path(DATASET_PATH) / "selected_r30" # os.path.join(PHOTOS_PATH, "selected_r30")
+    # default_path = Path("/home/honzamac/Edu/m5/Projekt_D/datasets/LIVEwild/Images/trainingImages/")
+    print(f"Dataset_path: {default_path}")
+    # input_str = input("Dataset path: ")
+    # input_path = Path(input_str).resolve()
+
+    dataset_path = default_path
+    # dataset_path = input_path if input_str != "" else default_path
+
+    img_files = sorted(
+        img_file for img_file in dataset_path.iterdir()
+        if img_file.is_file() and img_file.suffix.lower() in IMAGE_EXTS
+    )
+    assert len(img_files) > 0, "No images loaded!"
+
+    if type(MAX_IMAGES) is int:
+        max_idx = min(len(img_files), MAX_IMAGES)
+        img_files = img_files[:max_idx]
+    n_images = len(img_files)
+
+    img_idx = 0
+    fig, ax = plt.subplots()
 
     dataset_stats = {}
     file_version_idx = 1
