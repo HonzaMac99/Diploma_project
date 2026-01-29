@@ -12,20 +12,20 @@ from pathlib import Path
 from datetime import datetime, timezone
 from brisque import BRISQUE
 from tqdm import tqdm
-
 import cv2
 
 DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/"
+IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 IMG_NUM_RES = 6    # orig_res = [3000 x 4000] --> [375 x 500] (4)
+
 OVERRIDE_JSON = False
 SAVE_SCORE_EXIF = True
-
 SHOW_IMAGES = True
 MAX_IMAGES = 3 # maximum number of images to process
 
 _brisque_obj = None
 
-### Function without printing and plotting for main script #############################################################
+################################################# Main script function #################################################
 def compute_brisque_scores(dataset_path : Path, img_files : list):
     brisque_obj = get_brisque()
     scores = []
@@ -47,6 +47,9 @@ def compute_brisque_scores(dataset_path : Path, img_files : list):
         # we don't use cv2.resize, because interpolation can create artifacts and bias the img statistics
 
         scores.append(brisque_obj.score(img_tfd))
+
+    # todo: save scores
+
     return scores
 ########################################################################################################################
 
@@ -110,7 +113,7 @@ def compute_scores():
     img_stats_list = []  # list to store all data
 
     # print("Computing scores:", end="")
-    for img_name in images:
+    for img_name in img_files:
         img_path = os.path.join(dataset_path, img_name)
 
         # img1 = skimage.io.imread(img_path)
@@ -165,7 +168,7 @@ def compute_scores():
             show(b_scores, img_idx)
 
         img_stats_list.append(img_stats)
-        img_idx = (img_idx + 1) % len(images)
+        img_idx = (img_idx + 1) % len(img_files)
 
         if type(MAX_IMAGES) is int and img_idx == MAX_IMAGES:
             break
@@ -259,9 +262,11 @@ def load_exif_comment(img_path):
 
 
 def show(b_scores, img_idx, interactive=False):
-    global ax
+    global fig, ax
+    global img_files
+
     ax.clear()
-    img_path = os.path.join(dataset_path, images[img_idx])
+    img_path = os.path.join(dataset_path, img_files[img_idx])
 
     # img1 = skimage.io.imread(img_path)
     img = Image.open(img_path)
@@ -273,7 +278,7 @@ def show(b_scores, img_idx, interactive=False):
     exif_text = "EXIF: " + load_exif_comment(img_path)
 
     ax.imshow(img)
-    n_images = len(images) if type(MAX_IMAGES) is not int else MAX_IMAGES
+    n_images = len(img_files) if type(MAX_IMAGES) is not int else MAX_IMAGES
     ax.set_title(f"Brisque score: {b_score:.2f}   [{img_idx+1}/{n_images}]")
     ax.axis("off")
 
@@ -296,9 +301,10 @@ def show(b_scores, img_idx, interactive=False):
         plt.pause(0.001)
 
 
-def on_key(event, b_scores):
-    global img_idx
-    n_images = len(images) if type(MAX_IMAGES) is not int else MAX_IMAGES
+def on_key(event, scores):
+    global img_files
+    global img_idx, n_images
+
     if event.key == "d":
         img_idx = (img_idx + 1) % n_images
     elif event.key == "a":
@@ -306,7 +312,7 @@ def on_key(event, b_scores):
     elif event.key == "q":
         plt.close(fig)
         return
-    show(b_scores, img_idx, interactive=True)
+    show(scores, img_idx, interactive=True)
 
 
 def save_json_versioned(path: Path, idx, data: dict):
@@ -342,7 +348,7 @@ if __name__ == "__main__":
 
     img_files = sorted(
         img_file for img_file in dataset_path.iterdir()
-        if img_file.is_file() and img_file.suffix.lower() in IMAGE_EXTS
+        if img_file.is_file() and img_file.suffix.lower() in IMG_EXTS
     )
     assert len(img_files) > 0, "No images loaded!"
 

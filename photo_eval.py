@@ -9,15 +9,15 @@ import piexif
 
 from brisque_eval import compute_brisque_scores
 from nima_eval import compute_nima_scores
+from sift_eval import compute_sift_similarities
+from efnetv2_eval import compute_efnetv2_similarities
 
-# Todo: import sift_eval
-# Todo: import clip_eval
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/"
-IMAGE_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
+IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
 MAX_IMAGES = 3
-IMG_NUM_RES = 6    # orig_res = [3000 x 4000] --> [375 x 500] (4)
 SAVE_SCORE_EXIF = False
 
 def save_json_versioned(path: Path, data: dict):
@@ -119,8 +119,8 @@ def show_img_scores(scores, img_idxs, interactive=False):
                 transform=ax.transAxes)
 
     fig.subplots_adjust(top=0.8)  # leave space for text
-    t1 = fig.text(0.5, 0.95, f"{keys_list[2]}: {scores[keys_list[2]][idx1][idx2]}", ha='center', fontsize=14, fontweight='bold')
-    t2 = fig.text(0.5, 0.90, f"{keys_list[3]}: {scores[keys_list[3]][idx1][idx2]}", ha='center', fontsize=14, fontweight='bold')
+    t1 = fig.text(0.5, 0.95, f"{keys_list[2]:<8}: {scores[keys_list[2]][idx1][idx2]:7.2f}", ha='center', fontsize=14, fontweight='bold', family="monospace")
+    t2 = fig.text(0.5, 0.90, f"{keys_list[3]:<8}: {scores[keys_list[3]][idx1][idx2]:7.2f}", ha='center', fontsize=14, fontweight='bold', family="monospace")
     t3 = fig.text(0.5, 0.05, f"[{idx1+1}, {idx2+1} | {n_images}]", ha='center', fontsize=14, fontweight='bold')
     fig.custom_texts = [t1, t2, t3]
 
@@ -168,7 +168,7 @@ if __name__ == "__main__":
 
     img_files = sorted(
         img_file for img_file in dataset_path.iterdir()
-        if img_file.is_file() and img_file.suffix.lower() in IMAGE_EXTS
+        if img_file.is_file() and img_file.suffix.lower() in IMG_EXTS
     )
     assert len(img_files) > 0, "No images loaded!"
 
@@ -181,13 +181,12 @@ if __name__ == "__main__":
     img_idx_2 = 0
     fig, axes = plt.subplots(1, 2)
 
-    # todo: brisque, nima - loading from files
-    # todo: sift, efnetv2
+    # todo: loading from files for all
     scores = {
         "brisque":  compute_brisque_scores(dataset_path, img_files),
         "nima":     compute_nima_scores(dataset_path, img_files),
-        "sift":     np.random.normal(loc=50.0, scale=10.0, size=(n_images, n_images)).tolist(),
-        "efnetv2":  np.random.normal(loc=50.0, scale=10.0, size=(n_images, n_images)).tolist()
+        "sift":     compute_sift_similarities(dataset_path, img_files),
+        "efnetv2":  compute_efnetv2_similarities(dataset_path, img_files)
     }
     # np.random.normal(loc=50.0, scale=10.0, size=(n_images)).tolist()
 

@@ -8,34 +8,83 @@ import os
 import json
 from datetime import datetime, timezone
 import time
+from tqdm import tqdm
 
-PHOTO_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/"
+IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
+WEIGHTS_PATH = "data/model.pth"
 IMG_NUM_RES = 1    # orig_res = [3000 x 4000] --> [224, 244] (fixed nima input size)
 N_NEIGHBORS = 20
+N_SIFT_FEATS = 1000
 OVERRIDE_JSON = True
 SAVE_SCORE_EXIF = False
 
 SHOW_IMAGES = True
 MAX_IMAGES = None # maximum number of images to process (for debugging)
 
-dataset_path = os.path.join(PHOTO_PATH, "selected_r30")
-images = sorted(f for f in os.listdir(dataset_path)
-                if f.lower().endswith((".png", ".jpg", ".jpeg")))
+_sift = None
+_bf = None
 
-img_idx_1 = 0
-img_idx_2 = 1
-fig, axes = plt.subplots(1, 2)
-matches = []
+################################################# Main script function #################################################
+def compute_sift_similarities(dataset_path, img_files):
+    sift, bf = get_sift_bf()
 
-sift = cv2.SIFT_create(nfeatures=1000)  # SIFT algorithm with number of keypoints
-bf = cv2.BFMatcher()  # keypoint matcher
+    n_images = len(img_files)
+    n_neighbors = N_NEIGHBORS
 
+    features = {}  # keypoints and descriptors
+    sift_scores = np.full((n_images, n_images), -np.inf)
+
+    # todo: try different resolutions
+    # todo: compute avg times
+    for i, img_name in enumerate(tqdm(img_files, desc="SIFT feats", unit="img")):
+        img_path = dataset_path / img_name
+        img = image_resize(cv2.imread(img_path), 1024) # todo: why is he doing this? is 1024 max axis len??
+        keypoints, descriptors = sift.detectAndCompute(img, None)
+        features[i] = (keypoints, descriptors)
+
+    for i, img_name in enumerate(tqdm(img_files, desc="SIFT matches", unit="img&nbrs")):
+        keypoints_i, descriptors_i = features[i]
+
+        for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):
+            # if i == j:
+            #     continue
+
+            keypoints_j, descriptors_j = features[j]
+
+            if len(keypoints_i) == 0 or len(keypoints_j) == 0:
+                sift_score = 0
+            else:
+                matches = compute_matches(descriptors_i, descriptors_j)
+
+                # todo: find the right number of sift feats for optimal time and score credibility
+                # sift_score = compute_score(len(matches), len(keypoints_i), len(keypoints_j))
+                sift_score = len(matches)
+
+            sift_scores[i, j] = sift_score
+
+    # todo: save scores
+    # result_pth = "results/image_statistics.json"
+    # result_pth = os.path.join(os.getcwd(), result_pth)
+    # os.makedirs(os.path.dirname(result_pth), exist_ok=True)
+
+    # with open(result_pth, "w") as write_file:
+    #     json.dump(data, write_file, indent=2, ensure_ascii=False)
+
+    return sift_scores
 ########################################################################################################################
 
-def compute_SIFT(image):
-    return sift.detectAndCompute(image, None)
+
+def get_sift_bf():
+    global _sift, _bf
+    if _sift is None:
+        _sift = cv2.SIFT_create(nfeatures=N_SIFT_FEATS)  # SIFT algorithm with number of keypoints
+    if _bf is None:
+        _bf = cv2.BFMatcher()  # keypoint matcher
+    return _sift, _bf
 
 
+### Code inspired by Mr. B #############################################################################################
 def image_resize(image, max_d=1024):
     height, width = image.shape[:2]
     aspect_ratio = width / height
@@ -50,6 +99,7 @@ def image_resize(image, max_d=1024):
 
 
 def compute_matches(descr_1, descr_2):
+    _, bf = get_sift_bf()
     try:
         matches_12 = bf.knnMatch(descr_1, descr_2, k=2) # get cv2.DMatch objs
         matches_21 = bf.knnMatch(descr_2, descr_1, k=2)
@@ -92,7 +142,7 @@ def compute_similarities():
     plt.ion()
 
     print("Computing SIFT similarity scores:")
-    n_images = len(images)
+    n_images = len(img_files)
     n_neighbors = N_NEIGHBORS
 
     features = {}  # keypoints and descriptors
@@ -101,13 +151,13 @@ def compute_similarities():
 
     # todo: try different resolutions
     # todo: compute avg times
-    for i, img_name in enumerate(images):
+    for i, img_name in enumerate(img_files):
         img_path = os.path.join(dataset_path, img_name)
         img = image_resize(cv2.imread(img_path), 1024)
-        keypoints, descriptors = compute_SIFT(img)
+        keypoints, descriptors = sift.detectAndCompute(img, None)
         features[i] = (keypoints, descriptors)
 
-    for i, img_name in enumerate(images):
+    for i, img_name in enumerate(img_files):
         img_1_path = os.path.join(dataset_path, img_name)
         keypoints_i, descriptors_i = features[i]
 
@@ -117,7 +167,7 @@ def compute_similarities():
                     break
                 else:
                     continue
-            img_2_path = os.path.join(dataset_path, images[j])
+            img_2_path = os.path.join(dataset_path, img_files[j])
             keypoints_j, descriptors_j = features[j]
 
             if len(keypoints_i) == 0 or len(keypoints_j) == 0:
@@ -156,7 +206,7 @@ def compute_similarities():
         "description": "SIFT statistics of image pairs from dataset computed across multiple resolutions",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "author": "Jan Macalík",
-        "num_images": len(images) if type(MAX_IMAGES) is not int else MAX_IMAGES,
+        "num_images": len(img_files) if type(MAX_IMAGES) is not int else MAX_IMAGES,
         "num_resolutions": 1,
         "statistics": img_stats_list,
         # "features": features
@@ -170,7 +220,6 @@ def compute_similarities():
     #     json.dump(data, write_file, indent=2, ensure_ascii=False)
 
     return imgs_stats
-
 ########################################################################################################################
 
 
@@ -208,7 +257,7 @@ def show(scores, img_idxs, interactive=False):
     assert len(img_idxs) == 2, f"Size of img idxs has to be 2: {img_idxs}"
 
     for img_idx, ax in zip(img_idxs, axes):
-        img_path = os.path.join(dataset_path, images[img_idx])
+        img_path = os.path.join(dataset_path, img_files[img_idx])
 
         img = Image.open(img_path)
         img = ImageOps.exif_transpose(img)  # apply EXIF orientation
@@ -220,7 +269,7 @@ def show(scores, img_idxs, interactive=False):
 
     score = scores[img_idxs[0]][img_idxs[1]]
 
-    n_images = len(images) if type(MAX_IMAGES) is not int else MAX_IMAGES
+    n_images = len(img_files) if type(MAX_IMAGES) is not int else MAX_IMAGES
     fig.suptitle(
         f"SIFT score: {score:.2f}   [{img_idxs[0]+1}, {img_idxs[1]+1} | {n_images}]",
         fontsize=14
@@ -235,7 +284,7 @@ def show(scores, img_idxs, interactive=False):
 
 def on_key(event, sift_scores):
     global img_idx_1, img_idx_2
-    n_images = len(images) if type(MAX_IMAGES) is not int else MAX_IMAGES
+    n_images = len(img_files) if type(MAX_IMAGES) is not int else MAX_IMAGES
     if event.key == "d":
         img_idx_1 = (img_idx_1 + 1) % n_images
     elif event.key == "a":
@@ -274,6 +323,34 @@ def save_json_versioned(path: Path, idx, data: dict):
 
 
 if __name__ == "__main__":
+    default_path = Path(DATASET_PATH) / "selected_r30" # os.path.join(PHOTOS_PATH, "selected_r30")
+    # default_path = Path("/home/honzamac/Edu/m5/Projekt_D/datasets/LIVEwild/Images/trainingImages/")
+    print(f"Dataset_path: {default_path}")
+    # input_str = input("Dataset path: ")
+    # input_path = Path(input_str).resolve()
+
+    dataset_path = default_path
+    # dataset_path = input_path if input_str != "" else default_path
+
+    img_files = sorted(
+        img_file for img_file in dataset_path.iterdir()
+        if img_file.is_file() and img_file.suffix.lower() in IMG_EXTS
+    )
+    assert len(img_files) > 0, "No images loaded!"
+
+    if type(MAX_IMAGES) is int:
+        max_idx = min(len(img_files), MAX_IMAGES)
+        img_files = img_files[:max_idx]
+    n_images = len(img_files)
+
+    img_idx_1 = 0
+    img_idx_2 = 1
+    fig, axes = plt.subplots(1, 2)
+
+    sift = cv2.SIFT_create(nfeatures=1000)  # SIFT algorithm with number of keypoints
+    bf = cv2.BFMatcher()  # keypoint matcher
+
+    matches = []
 
     dataset_stats = {}
     file_version_idx = 0

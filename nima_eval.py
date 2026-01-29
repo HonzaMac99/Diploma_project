@@ -14,14 +14,13 @@ from datetime import datetime, timezone
 import torchvision.models as models
 import torchvision.transforms as transforms
 
-
 DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/"
 IMAGE_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
-MODEL_PATH = "data/model.pth"
+WEIGHTS_PATH = "data/model.pth"
+
 IMG_NUM_RES = 1    # orig_res = [3000 x 4000] --> [224, 244] (fixed nima input size)
 OVERRIDE_JSON = True
 SAVE_SCORE_EXIF = False
-
 SHOW_IMAGES = True
 MAX_IMAGES = None # maximum number of images to process
 
@@ -45,10 +44,11 @@ class NIMA(nn.Module):
         return out_f, out
 
 
-def build_nima_model(model_pth: str, cuda: bool = True, seed: int | None = None):
+def build_nima_model(weights_path: Path, cuda: bool = True, seed: int | None = None):
     """
     Loads NIMA model with pretrained VGG16 base and returns it on the proper device.
     """
+    print("[Nima]: Building model")
     if seed is not None:
         torch.manual_seed(seed)
 
@@ -57,8 +57,8 @@ def build_nima_model(model_pth: str, cuda: bool = True, seed: int | None = None)
     base_model = models.vgg16(weights=models.VGG16_Weights.DEFAULT)
     model = NIMA(base_model)
 
-    model_path = Path(model_pth).resolve()
-    state_dict = torch.load(model_path, map_location="cpu") # first load to cpu, then to gpu with the model all at once
+    weights_path = Path(weights_path).resolve()
+    state_dict = torch.load(weights_path, map_location="cpu") # first load to cpu, then to gpu with the model all at once
     model.load_state_dict(state_dict)
 
     model.to(device)
@@ -71,11 +71,10 @@ def build_nima_model(model_pth: str, cuda: bool = True, seed: int | None = None)
 def get_nima_model():
     global _nima_model
     if _nima_model is None:
-        model_path = MODEL_PATH
-        _nima_model, _ = build_nima_model(model_path)
+        _nima_model, _ = build_nima_model(WEIGHTS_PATH)
     return _nima_model
 
-### Function without printing and plotting for main script #############################################################
+################################################# Main script function #################################################
 def compute_nima_scores(dataset_path : Path, img_files : list, cuda=True):
     nima_model = get_nima_model()
     device = torch.device("cuda" if torch.cuda.is_available() and cuda else "cpu")
@@ -107,11 +106,20 @@ def compute_nima_scores(dataset_path : Path, img_files : list, cuda=True):
         indices = torch.arange(1, 11, dtype=probs.dtype, device=probs.device) # class indices: 1..10
         nima_score = float((probs * indices).sum()) # weighted sum
 
+
         scores.append(nima_score)
+
+    # todo: image batches
+    # with torch.no_grad():
+    #     out_f, out_class = nima_model(imgs)  # imgs: [B, C, H, W]
+    # out_class = out_class.squeeze(-1) # ensure shape [B, 10]
+    # weights = torch.arange(1, 11, device=out_class.device, dtype=out_class.dtype) # class indices 1..10
+    # nima_scores = (out_class * weights).sum(dim=1) # weighted sum per image → [B]
+
+    # todo: save scores
 
     return scores
 ########################################################################################################################
-
 
 def nima_eval(img, cuda = True):
     start_t = time.time()
@@ -160,7 +168,7 @@ def compute_scores():
     img_stats_list = []  # list to store all data
 
     # print("Computing scores:", end="")
-    for i, img_name in enumerate(images):
+    for i, img_name in enumerate(img_files):
         img_path = os.path.join(dataset_path, img_name)
 
         # get exif orientation info
@@ -214,10 +222,12 @@ def compute_scores():
             show(nima_scores, img_idx)
 
         img_stats_list.append(img_stats)
-        img_idx = (img_idx + 1) % len(images)
+        img_idx = (img_idx + 1) % len(img_files)
 
         if MAX_IMAGES is not None and img_idx == MAX_IMAGES:
             break
+
+    # todo: image batches?
 
     dataset_stats = {
         "description": "BRISQUE statistics of dataset images computed across multiple resolutions",
@@ -303,7 +313,7 @@ def load_exif_comment(img_path):
 def show(nima_scores, img_idx, interactive=False):
     global ax
     ax.clear()
-    img_path = os.path.join(dataset_path, images[img_idx])
+    img_path = os.path.join(dataset_path, img_files[img_idx])
 
     # img1 = skimage.io.imread(img_path)
     img = Image.open(img_path)
@@ -315,7 +325,7 @@ def show(nima_scores, img_idx, interactive=False):
     exif_text = "EXIF: " + load_exif_comment(img_path)
 
     ax.imshow(img)
-    n_images = len(images) if type(MAX_IMAGES) is not int else MAX_IMAGES
+    n_images = len(img_files) if type(MAX_IMAGES) is not int else MAX_IMAGES
     ax.set_title(f"Nima score: {nima_score:.2f}   [{img_idx+1}/{n_images}]")
     ax.axis("off")
 
@@ -340,7 +350,7 @@ def show(nima_scores, img_idx, interactive=False):
 
 def on_key(event, nima_scores):
     global img_idx
-    n_images = len(images) if type(MAX_IMAGES) is not int else MAX_IMAGES
+    n_images = len(img_files) if type(MAX_IMAGES) is not int else MAX_IMAGES
     if event.key == "d":
         img_idx = (img_idx + 1) % n_images
     elif event.key == "a":
