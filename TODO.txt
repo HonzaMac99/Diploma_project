@@ -1,27 +1,22 @@
 1b) Počítat clustery, nastavit vhodné prahy
-2) Datasety Tid2023, LIVE + mozna AVA
+2b) stahnout AVA dataset (?)
 3) Sift udělat rozlišení a časy
 4) Celkova uprava kodu, udělat vse vic MODULARNI
 4b) (optional)(!): zkusit integrovat něco noveho, nahradit: explicitní metody (Brisque, SIFT?) --> NN
 5) fine tuning existujících sítí na našich a dalších datasetech
-=====================================================================
 6) Integrace všeho do aplikace z přikazove řádky - důraz na jednoduchost použití, use cases
-
-
+=====================================================================
 
 
 Side quests:
-a) replace all os paths with pathlib
-b) put images into batches for faster computation
-
-
-
+c) základní ukládání výsledků: dataset/path/to/photos/ --> path_to_photos_scores_brisque.json
+d) if the content of the img folder changes, then we need to check that with the json file and fill in the missing scores
 
 
 Done:
 1) EfficientNetv2b1 integration - content similarity computation and display
-
-
-
+a) replace all os paths with pathlib
+b) put images into batches for faster computation
+2) Datasety Tid2023, LIVE + mozna AVA
 
 

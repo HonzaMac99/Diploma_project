@@ -14,7 +14,7 @@ from brisque import BRISQUE
 from tqdm import tqdm
 import cv2
 
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 IMG_NUM_RES = 6    # orig_res = [3000 x 4000] --> [375 x 500] (4)
 
@@ -114,7 +114,7 @@ def compute_scores():
 
     # print("Computing scores:", end="")
     for img_name in img_files:
-        img_path = os.path.join(dataset_path, img_name)
+        img_path = dataset_path / img_name
 
         # img1 = skimage.io.imread(img_path)
         img_raw = Image.open(img_path)
@@ -183,8 +183,8 @@ def compute_scores():
     }
 
     # result_pth = "results/image_statistics.json"
-    # result_pth = os.path.join(os.getcwd(), result_pth)
-    # os.makedirs(os.path.dirname(result_pth), exist_ok=True)
+    # result_pth = Path.cwd() / result_pth
+    # result_pth.parent.mkdir(parents=True, exist_ok=True)
 
     # with open(result_pth, "w") as write_file:
     #     json.dump(data, write_file, indent=2, ensure_ascii=False)
@@ -266,7 +266,7 @@ def show(b_scores, img_idx, interactive=False):
     global img_files
 
     ax.clear()
-    img_path = os.path.join(dataset_path, img_files[img_idx])
+    img_path = dataset_path / img_files[img_idx]
 
     # img1 = skimage.io.imread(img_path)
     img = Image.open(img_path)
@@ -337,9 +337,9 @@ def save_json_versioned(path: Path, idx, data: dict):
 
 
 if __name__ == "__main__":
-    default_path = Path(DATASET_PATH) / "selected_r30" # os.path.join(PHOTOS_PATH, "selected_r30")
-    # default_path = Path("/home/honzamac/Edu/m5/Projekt_D/datasets/LIVEwild/Images/trainingImages/")
+    default_path = Path(DATASET_PATH)
     print(f"Dataset_path: {default_path}")
+
     # input_str = input("Dataset path: ")
     # input_path = Path(input_str).resolve()
 

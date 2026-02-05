@@ -6,6 +6,7 @@ from pathlib import Path
 import os
 import json
 import piexif
+import time
 
 from brisque_eval import compute_brisque_scores
 from nima_eval import compute_nima_scores
@@ -14,7 +15,9 @@ from efnetv2_eval import compute_efnetv2_similarities
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/"
+# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30"
+# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/LIVEwild/Images/trainingImages/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/tid2013/distorted_images"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
 MAX_IMAGES = 3
@@ -99,7 +102,7 @@ def show_img_scores(scores, img_idxs, interactive=False):
     fig.custom_texts = []
 
     for img_idx, ax in zip(img_idxs, axes):
-        img_path = os.path.join(dataset_path, img_files[img_idx])
+        img_path = dataset_path / img_files[img_idx]
 
         img = Image.open(img_path)
         img = ImageOps.exif_transpose(img)  # apply EXIF orientation
@@ -157,9 +160,9 @@ def on_key(event, scores):
 
 if __name__ == "__main__":
 
-    default_path = Path(DATASET_PATH) / "selected_r30" # os.path.join(PHOTOS_PATH, "selected_r30")
-    # default_path = Path("/home/honzamac/Edu/m5/Projekt_D/datasets/LIVEwild/Images/trainingImages/")
+    default_path = Path(DATASET_PATH)
     print(f"Dataset_path: {default_path}")
+
     # input_str = input("Dataset path: ")
     # input_path = Path(input_str).resolve()
 
@@ -181,7 +184,15 @@ if __name__ == "__main__":
     img_idx_2 = 0
     fig, axes = plt.subplots(1, 2)
 
-    # todo: loading from files for all
+    # # testing batching effectivity with Nima
+    # for batch_size in [1, 4, 16, 32]:
+    #     start_t = time.time()
+    #     compute_nima_scores(dataset_path, img_files, batch_size=batch_size)
+    #     end_t = time.time()
+    #     time_diff = end_t-start_t
+    #     print(f"NIMA took {time_diff:.2f} s for batch size {batch_size}")
+
+    # todo: saving data with all
     scores = {
         "brisque":  compute_brisque_scores(dataset_path, img_files),
         "nima":     compute_nima_scores(dataset_path, img_files),

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import time
 from tqdm import tqdm
 
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 WEIGHTS_PATH = "data/model.pth"
 IMG_NUM_RES = 1    # orig_res = [3000 x 4000] --> [224, 244] (fixed nima input size)
@@ -65,8 +65,8 @@ def compute_sift_similarities(dataset_path, img_files):
 
     # todo: save scores
     # result_pth = "results/image_statistics.json"
-    # result_pth = os.path.join(os.getcwd(), result_pth)
-    # os.makedirs(os.path.dirname(result_pth), exist_ok=True)
+    # result_pth = Path.cwd() / result_pth
+    # result_pth.parent.mkdir(parents=True, exist_ok=True)
 
     # with open(result_pth, "w") as write_file:
     #     json.dump(data, write_file, indent=2, ensure_ascii=False)
@@ -152,13 +152,13 @@ def compute_similarities():
     # todo: try different resolutions
     # todo: compute avg times
     for i, img_name in enumerate(img_files):
-        img_path = os.path.join(dataset_path, img_name)
+        img_path = dataset_path / img_name
         img = image_resize(cv2.imread(img_path), 1024)
         keypoints, descriptors = sift.detectAndCompute(img, None)
         features[i] = (keypoints, descriptors)
 
     for i, img_name in enumerate(img_files):
-        img_1_path = os.path.join(dataset_path, img_name)
+        img_1_path = dataset_path / img_name
         keypoints_i, descriptors_i = features[i]
 
         for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):
@@ -167,7 +167,7 @@ def compute_similarities():
                     break
                 else:
                     continue
-            img_2_path = os.path.join(dataset_path, img_files[j])
+            img_2_path = dataset_path / img_files[j]
             keypoints_j, descriptors_j = features[j]
 
             if len(keypoints_i) == 0 or len(keypoints_j) == 0:
@@ -213,8 +213,8 @@ def compute_similarities():
     }
 
     # result_pth = "results/image_statistics.json"
-    # result_pth = os.path.join(os.getcwd(), result_pth)
-    # os.makedirs(os.path.dirname(result_pth), exist_ok=True)
+    # result_pth = Path.cwd() / result_pth
+    # result_pth.parent.mkdir(parents=True, exist_ok=True)
 
     # with open(result_pth, "w") as write_file:
     #     json.dump(data, write_file, indent=2, ensure_ascii=False)
@@ -257,7 +257,7 @@ def show(scores, img_idxs, interactive=False):
     assert len(img_idxs) == 2, f"Size of img idxs has to be 2: {img_idxs}"
 
     for img_idx, ax in zip(img_idxs, axes):
-        img_path = os.path.join(dataset_path, img_files[img_idx])
+        img_path = dataset_path / img_files[img_idx]
 
         img = Image.open(img_path)
         img = ImageOps.exif_transpose(img)  # apply EXIF orientation
@@ -323,9 +323,10 @@ def save_json_versioned(path: Path, idx, data: dict):
 
 
 if __name__ == "__main__":
-    default_path = Path(DATASET_PATH) / "selected_r30" # os.path.join(PHOTOS_PATH, "selected_r30")
-    # default_path = Path("/home/honzamac/Edu/m5/Projekt_D/datasets/LIVEwild/Images/trainingImages/")
+
+    default_path = Path(DATASET_PATH)
     print(f"Dataset_path: {default_path}")
+
     # input_str = input("Dataset path: ")
     # input_path = Path(input_str).resolve()
 

@@ -15,7 +15,7 @@ from keras import preprocessing
 from keras.applications.efficientnet_v2 import preprocess_input, EfficientNetV2B1
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 WEIGHTS_PATH = "data/efficientnetv2-b1.h5"
 IMG_NUM_RES = 1    # orig_res = [3000 x 4000] --> [224, 244] (fixed nima input size)
@@ -66,8 +66,8 @@ def compute_efnetv2_similarities(dataset_path, img_files):
 
     # todo: save scores
     # result_pth = "results/image_statistics.json"
-    # result_pth = os.path.join(os.getcwd(), result_pth)
-    # os.makedirs(os.path.dirname(result_pth), exist_ok=True)
+    # result_pth = Path.cwd() / result_pth
+    # result_pth.parent.mkdir(parents=True, exist_ok=True)
 
     # with open(result_pth, "w") as write_file:
     #     json.dump(data, write_file, indent=2, ensure_ascii=False)
@@ -108,7 +108,7 @@ def compute_imgs_contents(target_path, recompute=False):
         }
         for i, img_name in enumerate(img_files):
             # todo: compute times
-            img_path = os.path.join(dataset_path, img_name)
+            img_path = dataset_path / img_name
             img_tfd = preprocessing.image.load_img(img_path, color_mode='rgb', target_size=(240, 240))
             img_contents = compute_contents(img_tfd, model)
 
@@ -116,7 +116,7 @@ def compute_imgs_contents(target_path, recompute=False):
             dataset_stats["img_paths"].append(img_files[i])
             dataset_stats["contents"].append(img_contents)
 
-        # with open(os.path.join(os.getcwd(), target_path), "w") as write_file:
+        # with open(Path.cwd() / target_path), "w") as write_file:
         #     json.dump(content_list, write_file, indent=2)
 
         np.savez(target_path, ids=dataset_stats["ids"],
@@ -143,14 +143,14 @@ def compute_similarities():
     efnetv2_scores = np.ones((n_images, n_images)) * (-1)
 
     for i, img_name in enumerate(img_files):
-        img_1_path = os.path.join(dataset_path, img_name)
+        img_1_path = dataset_path / img_name
         for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):
             if i == j:
                 if j+1 == MAX_IMAGES:
                     break
                 else:
                     continue
-            img_2_path = os.path.join(dataset_path, img_files[j])
+            img_2_path = dataset_path / img_files[j]
 
             efnetv2_score = (1 - distance.cdist([imgs_contents[i]], [imgs_contents[j]], 'cosine').item()) * 15
             efnetv2_scores[i, j] = efnetv2_score
@@ -191,8 +191,8 @@ def compute_similarities():
     }
 
     # result_pth = "results/image_statistics.json"
-    # result_pth = os.path.join(os.getcwd(), result_pth)
-    # os.makedirs(os.path.dirname(result_pth), exist_ok=True)
+    # result_pth = Path.cwd() / result_pth
+    # result_pth.parent.mkdir(parents=True, exist_ok=True)
 
     # with open(result_pth, "w") as write_file:
     #     json.dump(data, write_file, indent=2, ensure_ascii=False)
@@ -236,7 +236,7 @@ def show(sift_scores, img_idxs, interactive=False):
     assert len(img_idxs) == 2, f"Size of img idxs has to be 2: {img_idxs}"
 
     for img_idx, ax in zip(img_idxs, axes):
-        img_path = os.path.join(dataset_path, img_files[img_idx])
+        img_path = dataset_path / img_files[img_idx]
 
         img = Image.open(img_path)
         img = ImageOps.exif_transpose(img)  # apply EXIF orientation
@@ -302,9 +302,10 @@ def save_json_versioned(path: Path, idx, data: dict):
 
 
 if __name__ == "__main__":
-    default_path = Path(DATASET_PATH) / "selected_r30" # os.path.join(PHOTOS_PATH, "selected_r30")
-    # default_path = Path("/home/honzamac/Edu/m5/Projekt_D/datasets/LIVEwild/Images/trainingImages/")
+
+    default_path = Path(DATASET_PATH)
     print(f"Dataset_path: {default_path}")
+
     # input_str = input("Dataset path: ")
     # input_path = Path(input_str).resolve()
 

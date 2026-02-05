@@ -6,6 +6,8 @@ import skimage
 from PIL import Image, ImageOps
 import piexif
 import time
+
+from torchgen.model import BaseTy
 from tqdm import tqdm
 import os
 import json
@@ -14,15 +16,16 @@ from datetime import datetime, timezone
 import torchvision.models as models
 import torchvision.transforms as transforms
 
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30"
 IMAGE_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 WEIGHTS_PATH = "data/model.pth"
 
-IMG_NUM_RES = 1    # orig_res = [3000 x 4000] --> [224, 244] (fixed nima input size)
+# NIMA has fixed input img size: orig_res = [3000 x 4000] --> [224, 244]
 OVERRIDE_JSON = True
 SAVE_SCORE_EXIF = False
 SHOW_IMAGES = True
 MAX_IMAGES = None # maximum number of images to process
+BATCHES = False
 
 _nima_model = None
 
@@ -75,20 +78,36 @@ def get_nima_model():
     return _nima_model
 
 ################################################# Main script function #################################################
-def compute_nima_scores(dataset_path : Path, img_files : list, cuda=True):
+def process_nima_batch(batch, model, device, indices):
+    imgs = torch.stack(batch).to(device) # imgs: [B, C, H, W]
+
+    with torch.no_grad():
+        _, out_batch_classes = model(imgs)  # [B, 10]
+    # out_class = out_class.squeeze(-1) # ensure shape [B, 10]
+
+    # expected value: sum(p_i * i)
+    batch_scores = (out_batch_classes * indices).sum(dim=1) # weighted sum per image → [B]
+
+    return batch_scores.cpu().tolist()
+
+
+def compute_nima_scores(dataset_path : Path, img_files : list, batch_size : int = 32, cuda=True):
     nima_model = get_nima_model()
     device = torch.device("cuda" if torch.cuda.is_available() and cuda else "cpu")
-    scores = []
 
     nima_img_transform = transforms.Compose([
         transforms.Resize(256),
-        transforms.RandomCrop(224),           # Resize and crop (as in paper)
+        # transforms.RandomCrop(224),           # Resize and crop (as in paper)
+        transforms.CenterCrop(224),           # center crop for same scores
         transforms.ToTensor(),                # Convert to tensor and scale [0,255] -> [0,1]
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
     ])
 
-    # iterator = tqdm(img_files, desc="BRISQUE", unit="img") if show_progress else img_files
+    scores = []
+    batch = []
+    indices = torch.arange(1, 11, device=device).float()  # class indices: 1..10
+
     for img_name in tqdm(img_files, desc="NIMA", unit="img"):
         img_path = dataset_path / img_name
 
@@ -96,25 +115,23 @@ def compute_nima_scores(dataset_path : Path, img_files : list, cuda=True):
         img = ImageOps.exif_transpose(img)  # apply EXIF orientation
 
         img = nima_img_transform(img)  # transform for Nima
-        img = img.unsqueeze(dim=0)
-        img = img.to(device)
+        batch.append(img)
 
-        with torch.no_grad():
-            out_f, out_class = nima_model(img)
+        # img = img.unsqueeze(dim=0)
+        # img = img.to(device)
+        # with torch.no_grad():
+        #     out_f, out_class = nima_model(img) # [B, C, H, W]
 
-        probs = out_class.view(-1) # flatten to [10]
-        indices = torch.arange(1, 11, dtype=probs.dtype, device=probs.device) # class indices: 1..10
-        nima_score = float((probs * indices).sum()) # weighted sum
+        if len(batch) == batch_size:
+            with torch.no_grad():
+                batch_scores = process_nima_batch(batch, nima_model, device, indices)
+                scores.extend(batch_scores)
+                batch.clear()
 
-
-        scores.append(nima_score)
-
-    # todo: image batches
-    # with torch.no_grad():
-    #     out_f, out_class = nima_model(imgs)  # imgs: [B, C, H, W]
-    # out_class = out_class.squeeze(-1) # ensure shape [B, 10]
-    # weights = torch.arange(1, 11, device=out_class.device, dtype=out_class.dtype) # class indices 1..10
-    # nima_scores = (out_class * weights).sum(dim=1) # weighted sum per image → [B]
+    # last partial batch
+    if batch:
+        batch_scores = process_nima_batch(batch, nima_model, device, indices)
+        scores.extend(batch_scores)
 
     # todo: save scores
 
@@ -131,7 +148,8 @@ def nima_eval(img, cuda = True):
 
     nima_img_transform = transforms.Compose([
         transforms.Resize(256),
-        transforms.RandomCrop(224),           # Resize and crop (as in paper)
+        # transforms.RandomCrop(224),           # Resize and crop (as in paper)
+        transforms.CenterCrop(224),           # center crop for same scores
         transforms.ToTensor(),                # Convert to tensor and scale [0,255] -> [0,1]
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
@@ -148,14 +166,14 @@ def nima_eval(img, cuda = True):
     with torch.no_grad():
         out_f, out_class = nima_model(img)
 
-    probs = out_class.view(-1) # flatten to [10]
+    probs = out_class.cpu().view(-1) # flatten to [10]
     indices = torch.arange(1, 11) # class indices: 1..10
     nima_score = float((probs * indices).sum()) # weighted sum
 
     end_t = time.time()
-    nima_time = end_t-start_t
+    time_diff = end_t-start_t
 
-    return nima_score, nima_time
+    return nima_score, time_diff
 
 
 def compute_scores():
@@ -169,10 +187,10 @@ def compute_scores():
 
     # print("Computing scores:", end="")
     for i, img_name in enumerate(img_files):
-        img_path = os.path.join(dataset_path, img_name)
+        img_path = dataset_path / img_name
 
         # get exif orientation info
-        exif_dict = piexif.load(img_path)
+        exif_dict = piexif.load(str(img_path))
         orientation = exif_dict["0th"].get(piexif.ImageIFD.Orientation, 1)
         print(f"Orientation: {orientation}")
 
@@ -239,8 +257,8 @@ def compute_scores():
     }
 
     # result_pth = "results/image_statistics.json"
-    # result_pth = os.path.join(os.getcwd(), result_pth)
-    # os.makedirs(os.path.dirname(result_pth), exist_ok=True)
+    # result_pth = Path.cwd() / result_pth
+    # result_pth.parent.mkdir(parents=True, exist_ok=True)
 
     # with open(result_pth, "w") as write_file:
     #     json.dump(data, write_file, indent=2, ensure_ascii=False)
@@ -278,7 +296,7 @@ def save_exif_comment(image_path, quality_score):
     user_comment = f"Nima score: {quality_score:.3f}".encode('utf-8')
     exif_dict['Exif'][piexif.ExifIFD.UserComment] = user_comment
 
-    # problematic key Exif.Photo.SceneType = 41279 with int value
+    # problematic key Exif.Photo.SceneType = 41729 (or 41279) with int value
     exif_dict['Exif'].pop(41729, None)
     # print(exif_dict['Exif'])
 
@@ -313,7 +331,7 @@ def load_exif_comment(img_path):
 def show(nima_scores, img_idx, interactive=False):
     global ax
     ax.clear()
-    img_path = os.path.join(dataset_path, img_files[img_idx])
+    img_path = dataset_path / img_files[img_idx]
 
     # img1 = skimage.io.imread(img_path)
     img = Image.open(img_path)
@@ -383,9 +401,10 @@ def save_json_versioned(path: Path, idx, data: dict):
 
 
 if __name__ == "__main__":
-    default_path = Path(DATASET_PATH) / "selected_r30" # os.path.join(PHOTOS_PATH, "selected_r30")
-    # default_path = Path("/home/honzamac/Edu/m5/Projekt_D/datasets/LIVEwild/Images/trainingImages/")
+
+    default_path = Path(DATASET_PATH)
     print(f"Dataset_path: {default_path}")
+
     # input_str = input("Dataset path: ")
     # input_path = Path(input_str).resolve()
 
