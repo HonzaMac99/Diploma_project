@@ -13,13 +13,16 @@ from scipy.spatial import distance
 import tensorflow as tf
 from keras import preprocessing
 from keras.applications.efficientnet_v2 import preprocess_input, EfficientNetV2B1
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+from utils import *
 
 DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 WEIGHTS_PATH = "data/efficientnetv2-b1.h5"
 IMG_NUM_RES = 1    # orig_res = [3000 x 4000] --> [224, 244] (fixed nima input size)
 N_NEIGHBORS = 20
+
+SAVE_STATS = False
 OVERRIDE_JSON = True
 SAVE_SCORE_EXIF = False
 
@@ -73,10 +76,9 @@ def compute_efnetv2_similarities(dataset_path, img_files):
     #     json.dump(data, write_file, indent=2, ensure_ascii=False)
 
     return efnetv2_scores
-########################################################################################################################
 
-
-### Code inspired by Mr. B #############################################################################################
+# region Other experimental functions
+# inspired by LB
 def compute_contents(img, model):
     t = preprocessing.image.img_to_array(img)
     t = np.expand_dims(t, axis=0)
@@ -85,7 +87,7 @@ def compute_contents(img, model):
     f = f.tolist()
     return f[0]
 
-
+# inspired by LB
 def compute_imgs_contents(target_path, recompute=False):
     path = Path(target_path)
 
@@ -106,14 +108,14 @@ def compute_imgs_contents(target_path, recompute=False):
             "img_paths": [],
             "contents": []
         }
-        for i, img_name in enumerate(img_files):
+        for i, img_name in enumerate(img_paths):
             # todo: compute times
             img_path = dataset_path / img_name
             img_tfd = preprocessing.image.load_img(img_path, color_mode='rgb', target_size=(240, 240))
             img_contents = compute_contents(img_tfd, model)
 
             dataset_stats["ids"].append(i)
-            dataset_stats["img_paths"].append(img_files[i])
+            dataset_stats["img_paths"].append(img_paths[i])
             dataset_stats["contents"].append(img_contents)
 
         # with open(Path.cwd() / target_path), "w") as write_file:
@@ -123,36 +125,33 @@ def compute_imgs_contents(target_path, recompute=False):
                               img_paths=dataset_stats["img_paths"],
                               contents=dataset_stats["contents"])
     return dataset_stats
-########################################################################################################################
 
-
-def compute_similarities():
-    global img_idx, matches
+# inspired by LB
+def compute_similarities(img_paths, n_neighbors):
+    global viewer
     plt.ion()
 
-    print("Computing EfNetV2 similarity scores:")
-    path = Path("data/efnetv2_contents.npz")
+    path = Path("results/efnetv2_contents.npz")
     if path.exists():
         imgs_contents = np.load(path)["contents"]
     else:
+        print("Computing EfNetV2 contents:")
         imgs_contents = compute_imgs_contents(path)["contents"]
 
-    n_images = len(img_files)
-    n_neighbors = N_NEIGHBORS
+    print("Computing EfNetV2 similarity scores:")
+    n_images = len(img_paths)
     img_stats_list = []  # list to store results
     efnetv2_scores = np.ones((n_images, n_images)) * (-1)
+    viewer.scores = efnetv2_scores
 
-    for i, img_name in enumerate(img_files):
-        img_1_path = dataset_path / img_name
+    for i, img_1_path in enumerate(img_paths):
         for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):
             if i == j:
-                if j+1 == MAX_IMAGES:
-                    break
-                else:
-                    continue
-            img_2_path = dataset_path / img_files[j]
+                continue
 
-            efnetv2_score = (1 - distance.cdist([imgs_contents[i]], [imgs_contents[j]], 'cosine').item()) * 15
+            img_2_path = img_paths[j]
+
+            efnetv2_score = (1 - distance.cdist([imgs_contents[i]], [imgs_contents[j]], 'cosine').item()) * 100 # 15
             efnetv2_scores[i, j] = efnetv2_score
 
             print(f"({i+1}, {j+1}) score: {efnetv2_score}")
@@ -162,8 +161,8 @@ def compute_similarities():
             img_stats = {
                 "id_1": i,
                 "id_2": j,
-                "img_1": img_1_path,
-                "img_2": img_2_path,
+                "img_1": str(img_1_path),
+                "img_2": str(img_2_path),
                 "efnetv2_similarity_score": efnetv2_score  # todo: list for more resolutions?
                 # todo: times?
             }
@@ -171,20 +170,17 @@ def compute_similarities():
             # todo: exif?
 
             if SHOW_IMAGES:
-                show(efnetv2_scores, (i, j))
+                viewer.idx1 = i
+                viewer.idx2 = j
+                viewer.show_current(interactive=False)
 
             img_stats_list.append(img_stats)
-
-            if type(MAX_IMAGES) is int and j+1 == MAX_IMAGES:
-                break
-        if type(MAX_IMAGES) is int and i+1 == MAX_IMAGES:
-            break
 
     imgs_stats = {
         "description": "EffectiveNetV2-B1 statistics of image pairs from dataset computed across multiple resolutions",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "author": "Jan Macalík",
-        "num_images": len(img_files) if type(MAX_IMAGES) is not int else MAX_IMAGES,
+        "num_images": len(img_paths),
         "num_resolutions": 1,
         "statistics": img_stats_list,
         # "features": features
@@ -198,8 +194,6 @@ def compute_similarities():
     #     json.dump(data, write_file, indent=2, ensure_ascii=False)
 
     return imgs_stats
-
-########################################################################################################################
 
 
 def get_scores_json(dataset_stats):
@@ -229,106 +223,26 @@ def print_scores(dataset_stats):
     # avg_time /= n_imgs
     # print(f"Average time: {avg_time}")
 
-
-def show(sift_scores, img_idxs, interactive=False):
-    global fig, axes
-
-    assert len(img_idxs) == 2, f"Size of img idxs has to be 2: {img_idxs}"
-
-    for img_idx, ax in zip(img_idxs, axes):
-        img_path = dataset_path / img_files[img_idx]
-
-        img = Image.open(img_path)
-        img = ImageOps.exif_transpose(img)  # apply EXIF orientation
-        img = np.array(img)
-
-        ax.clear()
-        ax.imshow(img)
-        ax.axis("off")
-
-    score = sift_scores[img_idxs[0]][img_idxs[1]]
-
-    n_images = len(img_files) if type(MAX_IMAGES) is not int else MAX_IMAGES
-    fig.suptitle(
-        f"EfficientNetV2-B1 score: {score:.2f}   [{img_idxs[0]+1}, {img_idxs[1]+1} | {n_images}]",
-        fontsize=14
-    )
-    if interactive:
-        fig.canvas.draw_idle()
-    else:
-        fig.canvas.draw()
-        plt.show()
-        plt.pause(0.001)
-
-
-def on_key(event, scores):
-    global img_idx_1, img_idx_2
-    n_images = len(img_files) if type(MAX_IMAGES) is not int else MAX_IMAGES
-    if event.key == "d":
-        img_idx_1 = (img_idx_1 + 1) % n_images
-    elif event.key == "a":
-        img_idx_1 = (img_idx_1 - 1) % n_images
-    elif event.key == "w":
-        img_idx_2 = (img_idx_2 + 1) % n_images
-    elif event.key == "s":
-        img_idx_2 = (img_idx_2 - 1) % n_images
-    elif event.key == "q":
-        plt.close(fig)
-        return
-
-    img_idxs = (img_idx_1, img_idx_2)
-    show(scores, img_idxs, interactive=True)
-
-
-def save_json_versioned(path: Path, idx, data: dict):
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    if not path.exists() or OVERRIDE_JSON:
-        final_path = path
-    else:
-        # get the file name without the '_version' suffix; edge_case: idx=0 but "_" is in the string
-        file_name_base = path.stem.rsplit('_', 1)[0] if idx != 0 else path.stem
-        idx += 1
-        while True:
-            final_path = path.with_name(f"{file_name_base}_{idx}{path.suffix}")
-            if not final_path.exists():
-                break
-            idx += 1
-
-    with open(final_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-    return final_path
-
+# endregion
 
 if __name__ == "__main__":
+    dataset_path = Path(DATASET_PATH)
+    print(f"Dataset_path: {dataset_path}")
 
-    default_path = Path(DATASET_PATH)
-    print(f"Dataset_path: {default_path}")
-
-    # input_str = input("Dataset path: ")
-    # input_path = Path(input_str).resolve()
-
-    dataset_path = default_path
-    # dataset_path = input_path if input_str != "" else default_path
-
-    img_files = sorted(
-        img_file for img_file in dataset_path.iterdir()
-        if img_file.is_file() and img_file.suffix.lower() in IMG_EXTS
+    img_paths = sorted(
+        img_path for img_path in dataset_path.iterdir()
+        if img_path.suffix.lower() in IMG_EXTS
     )
-    assert len(img_files) > 0, "No images loaded!"
+    assert len(img_paths) > 0, "No images loaded!"
 
     if type(MAX_IMAGES) is int:
-        max_idx = min(len(img_files), MAX_IMAGES)
-        img_files = img_files[:max_idx]
-    n_images = len(img_files)
+        max_idx = min(len(img_paths), MAX_IMAGES)
+        img_paths = img_paths[:max_idx]
 
-    img_idx_1 = 0
-    img_idx_2 = 1
-    fig, axes = plt.subplots(1, 2)
-    matches = []
+    scores = []
+    viewer = ImageViewer(img_paths, scores, mode='dual', tool_name="Sift")
 
-    dataset_stats = {}
+    method_stats = {}
     file_version_idx = 1
     file_name_base = "efnetv2_stats"
 
@@ -337,18 +251,14 @@ if __name__ == "__main__":
 
     if imgs_stats_path.exists() and not OVERRIDE_JSON:
         with open(imgs_stats_path, "r", encoding="utf-8") as f:
-            dataset_stats = json.load(f)
-        print_scores(dataset_stats)
+            method_stats = json.load(f)
+        print_scores(method_stats)
     else:
-        dataset_stats = compute_similarities()
-        save_path = save_json_versioned(imgs_stats_path, file_version_idx, dataset_stats)
-        print(f"Saved new data as: {save_path}")
+        method_stats = compute_similarities(img_paths, N_NEIGHBORS)
+        if SAVE_STATS:
+            save_path = save_json_versioned(imgs_stats_path, file_version_idx, method_stats, override=OVERRIDE_JSON)
+            print(f"Saved new data as: {save_path}")
 
-    img_idx_1 = 0
-    img_idx_2 = 1
-    efnetv2_scores = get_scores_json(dataset_stats)
-    mpl.rcParams['keymap.save'] = [] # set w,s keys as a custom shortcuts to change the second image
-    fig.canvas.mpl_connect("key_press_event", lambda event: on_key(event, efnetv2_scores))
     plt.ioff()
-    show(efnetv2_scores, (img_idx_1, img_idx_2))
-    plt.show()
+    viewer.fig.canvas.mpl_connect('key_press_event', lambda event: viewer.on_key(event))
+    viewer.show_current(interactive=False)

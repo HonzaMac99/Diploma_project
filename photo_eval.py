@@ -8,6 +8,8 @@ import json
 import piexif
 import time
 
+from utils import ImageViewer
+
 from brisque_eval import compute_brisque_scores
 from nima_eval import compute_nima_scores
 from sift_eval import compute_sift_similarities
@@ -15,9 +17,9 @@ from efnetv2_eval import compute_efnetv2_similarities
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30"
 # DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/LIVEwild/Images/trainingImages/"
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/tid2013/distorted_images"
+# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/tid2013/distorted_images"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
 MAX_IMAGES = 3
@@ -87,12 +89,12 @@ def load_exif_comment(img_path):
 
 def show_img_scores(scores, img_idxs, interactive=False):
     global fig, axes
-    global img_files
+    global img_paths
 
     assert len(img_idxs) == 2, f"Size of img idxs has to be 2: {img_idxs}"
     idx1, idx2 = img_idxs
     keys_list = list(scores.keys())
-    n_images = len(img_files)
+    n_images = len(img_paths)
 
     # Remove old texts from figure (pair scores, info)
     if not hasattr(fig, 'custom_texts'):
@@ -102,7 +104,7 @@ def show_img_scores(scores, img_idxs, interactive=False):
     fig.custom_texts = []
 
     for img_idx, ax in zip(img_idxs, axes):
-        img_path = dataset_path / img_files[img_idx]
+        img_path = img_paths[img_idx]
 
         img = Image.open(img_path)
         img = ImageOps.exif_transpose(img)  # apply EXIF orientation
@@ -139,7 +141,7 @@ def show_img_scores(scores, img_idxs, interactive=False):
 
 
 def on_key(event, scores):
-    global img_files
+    global img_paths
     global img_idx_1, img_idx_2, n_images
 
     if event.key == "d":
@@ -169,20 +171,16 @@ if __name__ == "__main__":
     dataset_path = default_path
     # dataset_path = input_path if input_str != "" else default_path
 
-    img_files = sorted(
+    img_paths = sorted(
         img_file for img_file in dataset_path.iterdir()
         if img_file.is_file() and img_file.suffix.lower() in IMG_EXTS
     )
-    assert len(img_files) > 0, "No images loaded!"
+    assert len(img_paths) > 0, "No images loaded!"
 
     if type(MAX_IMAGES) is int:
-        max_idx = min(len(img_files), MAX_IMAGES)
-        img_files = img_files[:max_idx]
-    n_images = len(img_files)
-
-    img_idx_1 = 0
-    img_idx_2 = 0
-    fig, axes = plt.subplots(1, 2)
+        max_idx = min(len(img_paths), MAX_IMAGES)
+        img_paths = img_paths[:max_idx]
+    n_images = len(img_paths)
 
     # # testing batching effectivity with Nima
     # for batch_size in [1, 4, 16, 32]:
@@ -194,14 +192,13 @@ if __name__ == "__main__":
 
     # todo: saving data with all
     scores = {
-        "brisque":  compute_brisque_scores(dataset_path, img_files),
-        "nima":     compute_nima_scores(dataset_path, img_files),
-        "sift":     compute_sift_similarities(dataset_path, img_files),
-        "efnetv2":  compute_efnetv2_similarities(dataset_path, img_files)
+        "brisque":  compute_brisque_scores(dataset_path, img_paths),
+        "nima":     compute_nima_scores(dataset_path, img_paths),
+        "sift":     compute_sift_similarities(dataset_path, img_paths),
+        "efnetv2":  compute_efnetv2_similarities(dataset_path, img_paths)
     }
     # np.random.normal(loc=50.0, scale=10.0, size=(n_images)).tolist()
 
-    mpl.rcParams['keymap.save'] = [] # set w,s keys as a custom shortcuts to change the second image
-    fig.canvas.mpl_connect("key_press_event", lambda event: on_key(event, scores))
-    show_img_scores(scores, (img_idx_1, img_idx_2))
-    plt.show()
+    viewer = ImageViewer(img_paths, scores, mode='dual')
+    viewer.fig.canvas.mpl_connect('key_press_event', lambda event: viewer.on_key(event))
+    viewer.show_current(interactive=False)

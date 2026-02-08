@@ -16,15 +16,19 @@ from datetime import datetime, timezone
 import torchvision.models as models
 import torchvision.transforms as transforms
 
+from brisque_eval import SAVE_STATS
+from utils import *
+
 DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30"
-IMAGE_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
+IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 WEIGHTS_PATH = "data/model.pth"
 
 # NIMA has fixed input img size: orig_res = [3000 x 4000] --> [224, 244]
+SAVE_STATS = False
 OVERRIDE_JSON = True
 SAVE_SCORE_EXIF = False
 SHOW_IMAGES = True
-MAX_IMAGES = None # maximum number of images to process
+MAX_IMAGES = 10 # maximum number of images to process
 BATCHES = False
 
 _nima_model = None
@@ -47,7 +51,7 @@ class NIMA(nn.Module):
         return out_f, out
 
 
-def build_nima_model(weights_path: Path, cuda: bool = True, seed: int | None = None):
+def build_nima_model(weights_path: str, cuda: bool = True, seed: int | None = None):
     """
     Loads NIMA model with pretrained VGG16 base and returns it on the proper device.
     """
@@ -77,7 +81,7 @@ def get_nima_model():
         _nima_model, _ = build_nima_model(WEIGHTS_PATH)
     return _nima_model
 
-################################################# Main script function #################################################
+
 def process_nima_batch(batch, model, device, indices):
     imgs = torch.stack(batch).to(device) # imgs: [B, C, H, W]
 
@@ -87,7 +91,6 @@ def process_nima_batch(batch, model, device, indices):
 
     # expected value: sum(p_i * i)
     batch_scores = (out_batch_classes * indices).sum(dim=1) # weighted sum per image → [B]
-
     return batch_scores.cpu().tolist()
 
 
@@ -136,7 +139,8 @@ def compute_nima_scores(dataset_path : Path, img_files : list, batch_size : int 
     # todo: save scores
 
     return scores
-########################################################################################################################
+
+# region Other experimental functions
 
 def nima_eval(img, cuda = True):
     start_t = time.time()
@@ -176,8 +180,8 @@ def nima_eval(img, cuda = True):
     return nima_score, time_diff
 
 
-def compute_scores():
-    global img_idx
+def compute_scores(img_paths):
+    global viewer
     plt.ion()
 
     print("Computing NIMA scores:")
@@ -185,16 +189,16 @@ def compute_scores():
     nima_scores_raw = []
     img_stats_list = []  # list to store all data
 
-    # print("Computing scores:", end="")
-    for i, img_name in enumerate(img_files):
-        img_path = dataset_path / img_name
+    viewer.scores = nima_scores
+
+    for i, img_path in enumerate(img_paths):
+        img_idx = viewer.idx1
 
         # get exif orientation info
         exif_dict = piexif.load(str(img_path))
         orientation = exif_dict["0th"].get(piexif.ImageIFD.Orientation, 1)
         print(f"Orientation: {orientation}")
 
-        # img1 = skimage.io.imread(img_path)
         img_raw = Image.open(img_path)
         img_rot = ImageOps.exif_transpose(img_raw)  # apply EXIF orientation
 
@@ -212,7 +216,7 @@ def compute_scores():
 
         img_stats = {
             "id": i,
-            "img": img_path,
+            "img": str(img_path),
             "nima_score": nima_score,
             "resolution": [224, 224, 3],
             "data": data
@@ -237,13 +241,10 @@ def compute_scores():
             print("")
 
         if SHOW_IMAGES:
-            show(nima_scores, img_idx)
+            viewer.show_current(interactive=False)
 
         img_stats_list.append(img_stats)
-        img_idx = (img_idx + 1) % len(img_files)
-
-        if MAX_IMAGES is not None and img_idx == MAX_IMAGES:
-            break
+        viewer.idx1 = (viewer.idx1 + 1) % viewer.n_images
 
     # todo: image batches?
 
@@ -287,163 +288,42 @@ def print_scores(dataset_stats):
     print(f"Average time: {avg_time}")
 
 
-def save_exif_comment(image_path, quality_score):
-    """Save your calculated quality score back to EXIF"""
-    # Note: piexif is lightweight and more suitable directly for exif than pyexiv2
-    exif_dict = piexif.load(image_path)
-
-    # Store quality score in UserComment (or create custom tag)
-    user_comment = f"Nima score: {quality_score:.3f}".encode('utf-8')
-    exif_dict['Exif'][piexif.ExifIFD.UserComment] = user_comment
-
-    # problematic key Exif.Photo.SceneType = 41729 (or 41279) with int value
-    exif_dict['Exif'].pop(41729, None)
-    # print(exif_dict['Exif'])
-
-    # Write back to image
-    exif_bytes = piexif.dump(exif_dict)
-    piexif.insert(exif_bytes, image_path)
-
-    # # from Mr B: Rating and RatingPercent
-    # interval_size = (highest_q - lowest_q) / 5
-    # quality = q["aesthetic_quality"] * (1 - t_a_ratio) + q["technical_quality"] * t_a_ratio
-    # rating = int(((quality - lowest_q) / interval_size)) + 1
-    # rating_percent = int(((quality - lowest_q) / (interval_size * 5)) * 100)
-    #
-    # try:
-    #     with pyexiv2.Image(img) as handle:
-    #         meta = {'Exif.Image.Rating': rating,
-    #                 'Exif.Image.RatingPercent': rating_percent}
-    #         handle.modify_exif(meta)
-    # except Exception:
-    #     raise Exception
-
-
-def load_exif_comment(img_path):
-    try:
-        exif_dict = piexif.load(img_path)
-        comment = exif_dict["Exif"].get(piexif.ExifIFD.UserComment, b"")
-        return comment.decode("utf-8") if comment else "No EXIF data"
-    except Exception:
-        return "No EXIF data"
-
-
-def show(nima_scores, img_idx, interactive=False):
-    global ax
-    ax.clear()
-    img_path = dataset_path / img_files[img_idx]
-
-    # img1 = skimage.io.imread(img_path)
-    img = Image.open(img_path)
-    img = ImageOps.exif_transpose(img)  # apply EXIF orientation
-    img = np.array(img)
-
-    nima_score = nima_scores[img_idx]
-
-    exif_text = "EXIF: " + load_exif_comment(img_path)
-
-    ax.imshow(img)
-    n_images = len(img_files) if type(MAX_IMAGES) is not int else MAX_IMAGES
-    ax.set_title(f"Nima score: {nima_score:.2f}   [{img_idx+1}/{n_images}]")
-    ax.axis("off")
-
-    # Text under the image
-    ax.text(
-        0.5, -0.02,
-        exif_text,
-        transform=ax.transAxes,
-        ha="center",
-        va="top",
-        fontsize=12,
-        wrap=True
-    )
-
-    if interactive:
-        fig.canvas.draw_idle()
-    else:
-        fig.canvas.draw()
-        plt.show()
-        plt.pause(0.001)
-
-
-def on_key(event, nima_scores):
-    global img_idx
-    n_images = len(img_files) if type(MAX_IMAGES) is not int else MAX_IMAGES
-    if event.key == "d":
-        img_idx = (img_idx + 1) % n_images
-    elif event.key == "a":
-        img_idx = (img_idx - 1) % n_images
-    elif event.key == "q":
-        plt.close(fig)
-        return
-    show(nima_scores, img_idx, interactive=True)
-
-
-def save_json_versioned(path: Path, idx, data: dict):
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    if not path.exists() or OVERRIDE_JSON:
-        final_path = path
-    else:
-        # get the file name without the '_version' suffix; edge_case: idx=0 but "_" is in the string
-        file_name_base = path.stem.rsplit('_', 1)[0] if idx != 0 else path.stem
-        idx += 1
-        while True:
-            final_path = path.with_name(f"{file_name_base}_{idx}{path.suffix}")
-            if not final_path.exists():
-                break
-            idx += 1
-
-    with open(final_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-    return final_path
-
+# endregion
 
 if __name__ == "__main__":
+    dataset_path = Path(DATASET_PATH)
+    print(f"Dataset_path: {dataset_path}")
 
-    default_path = Path(DATASET_PATH)
-    print(f"Dataset_path: {default_path}")
-
-    # input_str = input("Dataset path: ")
-    # input_path = Path(input_str).resolve()
-
-    dataset_path = default_path
-    # dataset_path = input_path if input_str != "" else default_path
-
-    img_files = sorted(
-        img_file for img_file in dataset_path.iterdir()
-        if img_file.is_file() and img_file.suffix.lower() in IMAGE_EXTS
+    img_paths = sorted(
+        img_path for img_path in dataset_path.iterdir()
+        if img_path.suffix.lower() in IMG_EXTS
     )
-    assert len(img_files) > 0, "No images loaded!"
+    assert len(img_paths) > 0, "No images loaded!"
 
     if type(MAX_IMAGES) is int:
-        max_idx = min(len(img_files), MAX_IMAGES)
-        img_files = img_files[:max_idx]
-    n_images = len(img_files)
+        max_idx = min(len(img_paths), MAX_IMAGES)
+        img_paths = img_paths[:max_idx]
 
-    img_idx = 0
-    fig, ax = plt.subplots()
+    scores = []
+    viewer = ImageViewer(img_paths, scores, mode='single', tool_name="Nima")
 
-    dataset_stats = {}
+    method_stats = {}
     file_version_idx = 0
     file_name_base = "nima_stats"
 
     f_suffix = "" if file_version_idx == 0 else f"_{file_version_idx}"
-    dataset_stats_path = Path(f"data/{file_name_base}{f_suffix}.json")
+    dataset_stats_path = Path(f"results/{file_name_base}{f_suffix}.json")
 
     if dataset_stats_path.exists() and not OVERRIDE_JSON:
         with open(dataset_stats_path, "r", encoding="utf-8") as f:
-            dataset_stats = json.load(f)
-        print_scores(dataset_stats)
+            method_stats = json.load(f)
+        print_scores(method_stats)
     else:
-        dataset_stats = compute_scores()
-        save_path = save_json_versioned(dataset_stats_path, file_version_idx, dataset_stats)
-        print(f"Saved new data as: {save_path}")
+        method_stats = compute_scores(img_paths)
+        if SAVE_STATS:
+            save_path = save_json_versioned(dataset_stats_path, file_version_idx, method_stats, override=OVERRIDE_JSON)
+            print(f"Saved new data as: {save_path}")
 
-    img_idx = 0
-    nima_scores = [x["data"]["score_rot"] for x in dataset_stats["statistics"]]
-    fig.canvas.mpl_connect("key_press_event", lambda event: on_key(event, nima_scores))
     plt.ioff()
-    show(nima_scores, img_idx)
-    plt.show()
+    viewer.fig.canvas.mpl_connect('key_press_event', lambda event: viewer.on_key(event))
+    viewer.show_current(interactive=False)
