@@ -1,30 +1,25 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib as mpl
-from PIL import Image, ImageOps
-from pathlib import Path
 import cv2
-import os
-import json
-from datetime import datetime, timezone
 import time
 from tqdm import tqdm
 
-from brisque_eval import SAVE_STATS
 from utils import *
 
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30"
+DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
+RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
-WEIGHTS_PATH = "data/model.pth"
-IMG_NUM_RES = 1    # orig_res = [3000 x 4000] --> [224, 244] (fixed nima input size)
+
+MAX_IMAGES = 5 # maximum number of images to process (for debugging)
 N_NEIGHBORS = 20
 N_SIFT_FEATS = 1000
-SAVE_STATS = False
-OVERRIDE_JSON = True
-SAVE_SCORE_EXIF = False
+IMG_NUM_RES = 1    # orig_res = [3000 x 4000] --> [224, 244] (fixed nima input size)
 
 SHOW_IMAGES = True
-MAX_IMAGES = 10 # maximum number of images to process (for debugging)
+SAVE_SCORE_EXIF = False
+
+SAVE_STATS = True
+RECOMPUTE = False
+OVERRIDE = True
 
 _sift = None
 _bf = None
@@ -84,54 +79,52 @@ def compute_matches(descr_1, descr_2):
     return matches_robust
 
 
-def compute_sift_similarities(img_paths):
-    sift, _ = get_sift_bf()
+def compute_sift_similarities(paths_cfg, img_paths):
+    save_file_base = "sift_scores"
 
-    n_images = len(img_paths)
-    n_neighbors = N_NEIGHBORS
+    # ver_idx = 0
+    sift_scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
 
-    features = {}  # keypoints and descriptors
-    sift_scores = np.full((n_images, n_images), -np.inf)
+    if sift_scores is None or len(sift_scores) != len(img_paths):
+        sift, _ = get_sift_bf()
 
-    # todo: try different resolutions
-    # todo: compute avg times
-    for i, img_path in enumerate(tqdm(img_paths, desc="SIFT feats", unit="img")):
-        img = image_resize(cv2.imread(img_path), 1024) # todo: why is he doing this? is 1024 max axis len??
-        keypoints, descriptors = sift.detectAndCompute(img, None)
-        features[i] = (keypoints, descriptors)
+        n_images = len(img_paths)
+        n_neighbors = N_NEIGHBORS
 
-    for i, img_name in enumerate(tqdm(img_paths, desc="SIFT matches", unit="img&nbrs")):
-        keypoints_i, descriptors_i = features[i]
+        keypoints = {}
+        descriptors = {}
+        sift_scores = np.full((n_images, n_images), -np.inf)
 
-        for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):
-            if i == j:
-                continue
+        # todo: try different resolutions
+        # todo: compute avg times
+        for i, img_path in enumerate(tqdm(img_paths, desc="SIFT feats", unit="img")):
 
-            keypoints_j, descriptors_j = features[j]
+            img = image_resize(cv2.imread(str(img_path)), 1024) # todo: why is he doing this? is 1024 max axis len??
+            keypoints[i], descriptors[i] = sift.detectAndCompute(img, None)
 
-            if len(keypoints_i) == 0 or len(keypoints_j) == 0:
-                sift_score = 0
-            else:
-                matches = compute_matches(descriptors_i, descriptors_j)
+        for i, img_name in enumerate(tqdm(img_paths, desc="SIFT matches", unit="img&nbrs")):
+            for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):
+                if i == j:
+                    continue
 
-                # todo: find the right number of sift feats for optimal time and score credibility
-                # sift_score = compute_score(len(matches), len(keypoints_i), len(keypoints_j))
-                sift_score = len(matches)
+                if len(keypoints[i]) == 0 or len(keypoints[j]) == 0:
+                    # matches = []
+                    sift_score = 0
+                else:
+                    matches = compute_matches(descriptors[i], descriptors[j])
+                    sift_score = len(matches)
 
-            sift_scores[i, j] = sift_score
+                    # todo: find the right number of sift feats for optimal time and score credibility
+                    # sift_score = compute_score(len(matches), len(keypoints[i]), len(keypoints[j]))
 
-    # todo: save scores
-    # result_pth = "results/image_statistics.json"
-    # result_pth = Path.cwd() / result_pth
-    # result_pth.parent.mkdir(parents=True, exist_ok=True)
+                sift_scores[i, j] = sift_score
 
-    # with open(result_pth, "w") as write_file:
-    #     json.dump(data, write_file, indent=2, ensure_ascii=False)
+        # save scores after computation
+        save_results_versioned(paths_cfg, sift_scores, save_file_base, save_method="npz")
 
     return sift_scores
 
-############################################ Other experimental functions ##############################################
-
+# region Other experimental functions
 # inspired by LB
 def compute_score(matches, keypoint1, keypoint2):
     score = 1000 * (matches / min(keypoint1, keypoint2))
@@ -149,36 +142,35 @@ def compute_similarities(img_paths, n_neighbors):
     n_images = len(img_paths)
     img_stats_list = []  # list to store results
 
-    features = {}  # keypoints and descriptors
+    keypoints = {}
+    descriptors = {}
     sift_scores = np.ones((n_images, n_images)) * (-1)
     viewer.scores = sift_scores
 
     # todo: try different resolutions
     # todo: compute avg times
+
     for i, img_path in enumerate(img_paths):
+
         img = image_resize(cv2.imread(img_path), 1024)
-        keypoints, descriptors = sift.detectAndCompute(img, None)
-        features[i] = (keypoints, descriptors)
+        keypoints[i], descriptors[i] = sift.detectAndCompute(img, None)
 
     for i, img_1_path in enumerate(img_paths):
-        keypoints_i, descriptors_i = features[i]
-
         for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):
             if i == j:
                 continue
 
             matches = []
             img_2_path = img_paths[j]
-            keypoints_j, descriptors_j = features[j]
 
-            if len(keypoints_i) == 0 or len(keypoints_j) == 0:
+            if len(keypoints[i]) == 0 or len(keypoints[j]) == 0:
                 sift_score = 0
             else:
-                matches = compute_matches(descriptors_i, descriptors_j)
-                sift_score = compute_score(len(matches), len(keypoints_i), len(keypoints_j))
+                matches = compute_matches(descriptors[i], descriptors[j])
+                sift_score = compute_score(len(matches), len(keypoints[i]), len(keypoints[j]))
 
             sift_scores[i, j] = sift_score
-            print(f"({i+1}, {j+1}) score: {sift_score}, matches: {len(matches)} / ({len(keypoints_i)}, {len(keypoints_j)})")
+            print(f"({i+1}, {j+1}) score: {sift_score}, matches: {len(matches)} / ({len(keypoints[i])}, {len(keypoints[j])})")
             
             # todo: also some data?
 
@@ -190,15 +182,14 @@ def compute_similarities(img_paths, n_neighbors):
                 "sift_similarity_score": sift_score  # todo: list for more resolutions?
                 # todo: times?
             }
-            
-            # todo: exif?
+
+            img_stats_list.append(img_stats)
 
             if SHOW_IMAGES:
                 viewer.idx1 = i
                 viewer.idx2 = j
                 viewer.show_current(interactive=False)
 
-            img_stats_list.append(img_stats)
 
     imgs_stats = {
         "description": "SIFT statistics of image pairs from dataset computed across multiple resolutions",
@@ -219,12 +210,11 @@ def compute_similarities(img_paths, n_neighbors):
 
     return imgs_stats
 
-# region Other experimental functions
 
-def get_scores_json(dataset_stats):
-    n_images = dataset_stats["num_images"]
+def get_scores_json(method_stats):
+    n_images = method_stats["num_images"]
     scores = np.ones((n_images, n_images)) * (-1)
-    img_stats_data = dataset_stats["statistics"]
+    img_stats_data = method_stats["statistics"]
 
     for stat in img_stats_data:
         i = stat["id_1"]
@@ -237,6 +227,7 @@ def get_scores_json(dataset_stats):
 
 
 def print_scores(dataset_stats):
+    print("Printing Sift scores:")
     n_imgs = dataset_stats["num_images"]
     scores = get_scores_json(dataset_stats)
     # avg_time = 0
@@ -247,10 +238,10 @@ def print_scores(dataset_stats):
                 # avg_time += img_stats_data["time_rot"]
     # avg_time /= n_imgs
     # print(f"Average time: {avg_time}")
-
 # endregion
 
 if __name__ == "__main__":
+    method_name = "Sift"
     dataset_path = Path(DATASET_PATH)
     print(f"Dataset_path: {dataset_path}")
 
@@ -264,24 +255,30 @@ if __name__ == "__main__":
         max_idx = min(len(img_paths), MAX_IMAGES)
         img_paths = img_paths[:max_idx]
 
+    paths_cfg = {
+        "dataset_root": DATASET_ROOT,
+        "dataset_path": DATASET_PATH,
+        "results_root": RESULTS_ROOT
+    }
+
     scores = []
-    viewer = ImageViewer(img_paths, scores, mode='dual', tool_name="Sift")
+    viewer = ImageViewer(img_paths, scores, mode='dual', tool_name=method_name)
 
     method_stats = {}
-    file_version_idx = 0
-    file_name_base = "sift_stats"
+    file_name_base = "sift_stats_experimental"
+    ver_idx = None
 
-    f_suffix = "" if file_version_idx == 0 else f"_{file_version_idx}"
-    imgs_stats_path = Path(f"data/{file_name_base}{f_suffix}.json")
+    if not RECOMPUTE:
+        method_stats = load_results_versioned(paths_cfg, file_name_base, ver_idx=ver_idx, load_method="json")
 
-    if imgs_stats_path.exists() and not OVERRIDE_JSON:
-        with open(imgs_stats_path, "r", encoding="utf-8") as f:
-            method_stats = json.load(f)
+    if method_stats:
         print_scores(method_stats)
+        viewer.scores = get_scores_json(method_stats)
     else:
         method_stats = compute_similarities(img_paths, N_NEIGHBORS)
         if SAVE_STATS:
-            save_path = save_json_versioned(imgs_stats_path, file_version_idx, method_stats, override=OVERRIDE_JSON)
+            save_path = save_results_versioned(paths_cfg, method_stats, file_name_base, save_method="json",
+                                               override_last=OVERRIDE)
             print(f"Saved new data as: {save_path}")
 
     plt.ioff()

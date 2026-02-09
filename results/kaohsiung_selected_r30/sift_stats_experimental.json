@@ -1,0 +1,149 @@
+{
+  "description": "SIFT statistics of image pairs from dataset computed across multiple resolutions",
+  "created_at": "2026-02-09T18:57:41.797330+00:00",
+  "author": "Jan Macalík",
+  "num_images": 5,
+  "num_resolutions": 1,
+  "statistics": [
+    {
+      "id_1": 0,
+      "id_2": 1,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_192420.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_213843.jpg",
+      "sift_similarity_score": 0.0
+    },
+    {
+      "id_1": 0,
+      "id_2": 2,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_192420.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_221119.jpg",
+      "sift_similarity_score": 0.0
+    },
+    {
+      "id_1": 0,
+      "id_2": 3,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_192420.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_223621.jpg",
+      "sift_similarity_score": 0.0
+    },
+    {
+      "id_1": 0,
+      "id_2": 4,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_192420.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_230059.jpg",
+      "sift_similarity_score": 0.0
+    },
+    {
+      "id_1": 1,
+      "id_2": 0,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_213843.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_192420.jpg",
+      "sift_similarity_score": 0.0
+    },
+    {
+      "id_1": 1,
+      "id_2": 2,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_213843.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_221119.jpg",
+      "sift_similarity_score": 0.0
+    },
+    {
+      "id_1": 1,
+      "id_2": 3,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_213843.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_223621.jpg",
+      "sift_similarity_score": 0.0
+    },
+    {
+      "id_1": 1,
+      "id_2": 4,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_213843.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_230059.jpg",
+      "sift_similarity_score": 1.0
+    },
+    {
+      "id_1": 2,
+      "id_2": 0,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_221119.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_192420.jpg",
+      "sift_similarity_score": 0.0
+    },
+    {
+      "id_1": 2,
+      "id_2": 1,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_221119.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_213843.jpg",
+      "sift_similarity_score": 0.0
+    },
+    {
+      "id_1": 2,
+      "id_2": 3,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_221119.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_223621.jpg",
+      "sift_similarity_score": 3.0
+    },
+    {
+      "id_1": 2,
+      "id_2": 4,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_221119.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_230059.jpg",
+      "sift_similarity_score": 0.0
+    },
+    {
+      "id_1": 3,
+      "id_2": 0,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_223621.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_192420.jpg",
+      "sift_similarity_score": 0.0
+    },
+    {
+      "id_1": 3,
+      "id_2": 1,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_223621.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_213843.jpg",
+      "sift_similarity_score": 0.0
+    },
+    {
+      "id_1": 3,
+      "id_2": 2,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_223621.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_221119.jpg",
+      "sift_similarity_score": 3.0
+    },
+    {
+      "id_1": 3,
+      "id_2": 4,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_223621.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_230059.jpg",
+      "sift_similarity_score": 1.0
+    },
+    {
+      "id_1": 4,
+      "id_2": 0,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_230059.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_192420.jpg",
+      "sift_similarity_score": 0.0
+    },
+    {
+      "id_1": 4,
+      "id_2": 1,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_230059.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_213843.jpg",
+      "sift_similarity_score": 1.0
+    },
+    {
+      "id_1": 4,
+      "id_2": 2,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_230059.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_221119.jpg",
+      "sift_similarity_score": 0.0
+    },
+    {
+      "id_1": 4,
+      "id_2": 3,
+      "img_1": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_230059.jpg",
+      "img_2": "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/20250307_223621.jpg",
+      "sift_similarity_score": 1.0
+    }
+  ]
+}

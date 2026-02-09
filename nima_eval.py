@@ -1,35 +1,30 @@
-import numpy as np
-import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
-import skimage
-from PIL import Image, ImageOps
-import piexif
 import time
-
-from torchgen.model import BaseTy
 from tqdm import tqdm
-import os
-import json
-from pathlib import Path
-from datetime import datetime, timezone
+
 import torchvision.models as models
 import torchvision.transforms as transforms
 
-from brisque_eval import SAVE_STATS
 from utils import *
 
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30"
+DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
+RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
-WEIGHTS_PATH = "data/model.pth"
 
-# NIMA has fixed input img size: orig_res = [3000 x 4000] --> [224, 244]
-SAVE_STATS = False
-OVERRIDE_JSON = True
-SAVE_SCORE_EXIF = False
-SHOW_IMAGES = True
+WEIGHTS_PATH = Path.cwd() / "data/model.pth"
+
 MAX_IMAGES = 10 # maximum number of images to process
-BATCHES = False
+# NIMA has fixed input img size: orig_res = [3000 x 4000] --> [224, 244]
+# turn of batch processing by setting batch_size = 1
+
+SHOW_IMAGES = True
+SAVE_SCORE_EXIF = False
+
+SAVE_STATS = True
+RECOMPUTE = False
+OVERRIDE = True
 
 _nima_model = None
 
@@ -51,7 +46,7 @@ class NIMA(nn.Module):
         return out_f, out
 
 
-def build_nima_model(weights_path: str, cuda: bool = True, seed: int | None = None):
+def build_nima_model(weights_path: Path, cuda: bool = True, seed: int | None = None):
     """
     Loads NIMA model with pretrained VGG16 base and returns it on the proper device.
     """
@@ -64,7 +59,6 @@ def build_nima_model(weights_path: str, cuda: bool = True, seed: int | None = No
     base_model = models.vgg16(weights=models.VGG16_Weights.DEFAULT)
     model = NIMA(base_model)
 
-    weights_path = Path(weights_path).resolve()
     state_dict = torch.load(weights_path, map_location="cpu") # first load to cpu, then to gpu with the model all at once
     model.load_state_dict(state_dict)
 
@@ -94,49 +88,50 @@ def process_nima_batch(batch, model, device, indices):
     return batch_scores.cpu().tolist()
 
 
-def compute_nima_scores(dataset_path : Path, img_files : list, batch_size : int = 32, cuda=True):
-    nima_model = get_nima_model()
-    device = torch.device("cuda" if torch.cuda.is_available() and cuda else "cpu")
+def compute_nima_scores(paths_cfg, img_paths, batch_size = 32, cuda=True):
+    save_file_base = "nima_scores"
 
-    nima_img_transform = transforms.Compose([
-        transforms.Resize(256),
-        # transforms.RandomCrop(224),           # Resize and crop (as in paper)
-        transforms.CenterCrop(224),           # center crop for same scores
-        transforms.ToTensor(),                # Convert to tensor and scale [0,255] -> [0,1]
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
-    ])
+    # ver_idx = 0
+    scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
 
-    scores = []
-    batch = []
-    indices = torch.arange(1, 11, device=device).float()  # class indices: 1..10
+    if scores is None or len(scores) != len(img_paths):
+        nima_model = get_nima_model()
+        device = torch.device("cuda" if torch.cuda.is_available() and cuda else "cpu")
 
-    for img_name in tqdm(img_files, desc="NIMA", unit="img"):
-        img_path = dataset_path / img_name
+        nima_img_transform = transforms.Compose([
+            transforms.Resize(256),
+            # transforms.RandomCrop(224),           # Resize and crop (as in paper)
+            transforms.CenterCrop(224),           # center crop for same scores
+            transforms.ToTensor(),                # Convert to tensor and scale [0,255] -> [0,1]
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+        ])
 
-        img = Image.open(img_path)
-        img = ImageOps.exif_transpose(img)  # apply EXIF orientation
+        scores = []
+        batch = []
+        indices = torch.arange(1, 11, device=device).float()  # class indices: 1..10
 
-        img = nima_img_transform(img)  # transform for Nima
-        batch.append(img)
+        for img_path in tqdm(img_paths, desc="NIMA", unit="img"):
 
-        # img = img.unsqueeze(dim=0)
-        # img = img.to(device)
-        # with torch.no_grad():
-        #     out_f, out_class = nima_model(img) # [B, C, H, W]
+            img = Image.open(img_path)
+            img = ImageOps.exif_transpose(img)  # apply EXIF orientation
 
-        if len(batch) == batch_size:
-            with torch.no_grad():
-                batch_scores = process_nima_batch(batch, nima_model, device, indices)
-                scores.extend(batch_scores)
-                batch.clear()
+            img = nima_img_transform(img)  # transform for Nima
+            batch.append(img)
 
-    # last partial batch
-    if batch:
-        batch_scores = process_nima_batch(batch, nima_model, device, indices)
-        scores.extend(batch_scores)
+            if len(batch) == batch_size:
+                with torch.no_grad():
+                    batch_scores = process_nima_batch(batch, nima_model, device, indices)
+                    scores.extend(batch_scores)
+                    batch.clear()
 
-    # todo: save scores
+        # last partial batch
+        if batch:
+            batch_scores = process_nima_batch(batch, nima_model, device, indices)
+            scores.extend(batch_scores)
+
+        # save scores after computation
+        save_results_versioned(paths_cfg, scores, save_file_base, save_method="npz")
 
     return scores
 
@@ -192,8 +187,6 @@ def compute_scores(img_paths):
     viewer.scores = nima_scores
 
     for i, img_path in enumerate(img_paths):
-        img_idx = viewer.idx1
-
         # get exif orientation info
         exif_dict = piexif.load(str(img_path))
         orientation = exif_dict["0th"].get(piexif.ImageIFD.Orientation, 1)
@@ -205,7 +198,7 @@ def compute_scores(img_paths):
         nima_score, nima_time = nima_eval(img_rot)
         nima_scores.append(nima_score)
 
-        print(f"{img_idx + 1}: score: {nima_score}")
+        print(f"{i + 1}: score: {nima_score}")
 
         data = {
             "score_rot": nima_score,
@@ -227,24 +220,25 @@ def compute_scores(img_paths):
 
         if orientation == 1:
             nima_scores_raw.append(nima_score)
-            print(f"           (no rotation)")
+            print(f"   (no rotation)")
+            print("--------------------------------")
         else:
             nima_score_raw, nima_time_raw = nima_eval(img_raw)
             nima_scores_raw.append(nima_score_raw)
             score_diff = nima_scores[-1] - nima_scores_raw[-1]
 
-            img_stats["data"]["score_raw"] = nima_score_raw,
+            img_stats["data"]["score_raw"] = nima_score_raw
             img_stats["data"]["time_raw"] = nima_time_raw
 
             print(f"    (raw): {nima_score_raw}")
             print(f"   (diff): {score_diff}")
-            print("")
-
-        if SHOW_IMAGES:
-            viewer.show_current(interactive=False)
+            print("--------------------------------")
 
         img_stats_list.append(img_stats)
-        viewer.idx1 = (viewer.idx1 + 1) % viewer.n_images
+
+        if SHOW_IMAGES:
+            viewer.idx = i
+            viewer.show_current(interactive=False)
 
     # todo: image batches?
 
@@ -257,40 +251,38 @@ def compute_scores(img_paths):
         "statistics": img_stats_list
     }
 
-    # result_pth = "results/image_statistics.json"
-    # result_pth = Path.cwd() / result_pth
-    # result_pth.parent.mkdir(parents=True, exist_ok=True)
-
-    # with open(result_pth, "w") as write_file:
-    #     json.dump(data, write_file, indent=2, ensure_ascii=False)
-
     return dataset_stats
 
 
-def print_scores(dataset_stats):
-    n_imgs = dataset_stats["num_images"]
+def get_scores_json(method_stats):
+    return [x["data"]["score_rot"] for x in method_stats["statistics"]]
+
+
+def print_scores(result_stats):
+    print("Printing Nima scores:")
+    n_imgs = result_stats["num_images"]
     avg_time = 0
     for i in range(n_imgs):
-        img_stats_data = dataset_stats["statistics"][i]["data"]
+        img_stats_data = result_stats["statistics"][i]["data"]
         print(f"{i + 1}: scores: {img_stats_data["score_rot"]}")
 
         if img_stats_data["score_rot"] == img_stats_data["score_raw"]:
-            print(f"           (no rotation)")
+            print(f"   (no rotation)")
+            print("--------------------------------")
         else:
-            score_diff = img_stats_data["score_rot"] - img_stats_data["scores_raw"]
+            score_diff = img_stats_data["score_rot"] - img_stats_data["score_raw"]
             print(f"    (raw): {img_stats_data["score_raw"]}")
             print(f"   (diff): {score_diff}")
-            print("")
+            print("--------------------------------")
 
         avg_time += img_stats_data["time_rot"]
 
     avg_time /= n_imgs
     print(f"Average time: {avg_time}")
-
-
 # endregion
 
 if __name__ == "__main__":
+    method_name = "Nima"
     dataset_path = Path(DATASET_PATH)
     print(f"Dataset_path: {dataset_path}")
 
@@ -304,24 +296,30 @@ if __name__ == "__main__":
         max_idx = min(len(img_paths), MAX_IMAGES)
         img_paths = img_paths[:max_idx]
 
+    paths_cfg = {
+        "dataset_root": DATASET_ROOT,
+        "dataset_path": DATASET_PATH,
+        "results_root": RESULTS_ROOT
+    }
+
     scores = []
-    viewer = ImageViewer(img_paths, scores, mode='single', tool_name="Nima")
+    viewer = ImageViewer(img_paths, scores, mode='single', tool_name=method_name)
 
     method_stats = {}
-    file_version_idx = 0
-    file_name_base = "nima_stats"
+    file_name_base = "nima_stats_experimental"
+    ver_idx = None
 
-    f_suffix = "" if file_version_idx == 0 else f"_{file_version_idx}"
-    dataset_stats_path = Path(f"results/{file_name_base}{f_suffix}.json")
+    if not RECOMPUTE:
+        method_stats = load_results_versioned(paths_cfg, file_name_base, ver_idx=ver_idx, load_method="json")
 
-    if dataset_stats_path.exists() and not OVERRIDE_JSON:
-        with open(dataset_stats_path, "r", encoding="utf-8") as f:
-            method_stats = json.load(f)
+    if method_stats:
         print_scores(method_stats)
+        viewer.scores = get_scores_json(method_stats)
     else:
         method_stats = compute_scores(img_paths)
         if SAVE_STATS:
-            save_path = save_json_versioned(dataset_stats_path, file_version_idx, method_stats, override=OVERRIDE_JSON)
+            save_path = save_results_versioned(paths_cfg, method_stats, file_name_base, save_method="json",
+                                               override_last=OVERRIDE)
             print(f"Saved new data as: {save_path}")
 
     plt.ioff()

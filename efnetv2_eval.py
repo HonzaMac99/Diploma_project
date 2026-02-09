@@ -1,12 +1,6 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib as mpl
-from PIL import Image, ImageOps
-from pathlib import Path
-import os
-import json
-from datetime import datetime, timezone
 import time
+
+from torch.distributed.rpc.api import method_name
 from tqdm import tqdm
 from scipy.spatial import distance
 
@@ -16,64 +10,68 @@ from keras.applications.efficientnet_v2 import preprocess_input, EfficientNetV2B
 
 from utils import *
 
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30"
+DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
+RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
-WEIGHTS_PATH = "data/efficientnetv2-b1.h5"
-IMG_NUM_RES = 1    # orig_res = [3000 x 4000] --> [224, 244] (fixed nima input size)
-N_NEIGHBORS = 20
 
-SAVE_STATS = False
-OVERRIDE_JSON = True
-SAVE_SCORE_EXIF = False
+WEIGHTS_PATH = Path.cwd() / "data/efficientnetv2-b1.h5"
+
+MAX_IMAGES = 3 # maximum number of images to process (for debugging)
+N_NEIGHBORS = 20
+IMG_NUM_RES = 1    # orig_res = [3000 x 4000] --> [224, 244] (fixed nima input size)
 
 SHOW_IMAGES = True
-MAX_IMAGES = 3 # maximum number of images to process (for debugging)
+SAVE_SCORE_EXIF = False
 
-################################################# Main script function #################################################
-def compute_efnetv2_similarities(dataset_path, img_files):
+SAVE_STATS = True
+RECOMPUTE = False
+OVERRIDE = True
 
-    # todo: resolve tf incompatible gpu drivers
-    # gpus = tf.config.list_physical_devices('GPU')
-    # device_str = '/gpu:0' if gpus else '/cpu:0'
-    device_str = '/cpu:0'
 
-    contents = []
+def compute_efnetv2_similarities(paths_cfg, img_paths):
+    save_file_base = "efnetv2_scores"
 
-    with tf.device(device_str):
-        # todo: get our own weights
-        # class_model = EfficientNetV2B1(weights="imagenet")
-        model = EfficientNetV2B1(weights=WEIGHTS_PATH)
+    # ver_idx = 0
+    efnetv2_scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
 
-        for i, img_name in enumerate(tqdm(img_files, desc="EFNETV2 contents", unit="img")):
-            # todo: compute times
-            img_path = dataset_path / img_name
-            img_tfd = preprocessing.image.load_img(img_path, color_mode='rgb', target_size=(240, 240))
-            img_contents = compute_contents(img_tfd, model)
+    if efnetv2_scores is None or len(efnetv2_scores) != len(img_paths):
+        # todo: resolve tf incompatible gpu drivers
+        # gpus = tf.config.list_physical_devices('GPU')
+        # device_str = '/gpu:0' if gpus else '/cpu:0'
+        device_str = '/cpu:0'
 
-            contents.append(img_contents)
+        contents = []
 
-    n_images = len(img_files)
-    n_neighbors = N_NEIGHBORS
-    efnetv2_scores = np.full((n_images, n_images), -np.inf)
+        with tf.device(device_str):
+            # todo: get our own weights
+            # class_model = EfficientNetV2B1(weights="imagenet")
+            model = EfficientNetV2B1(weights=WEIGHTS_PATH)
 
-    for i, img_name in enumerate(tqdm(img_files, desc="EFNETV2 similarities", unit="img&nbrs")):
-        for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):
-            if i == j:
-                if j+1 == MAX_IMAGES:
-                    break
-                else:
-                    continue
+            for i, img_path in enumerate(tqdm(img_paths, desc="EFNETV2 contents", unit="img")):
+                # todo: compute times
+                img_tfd = preprocessing.image.load_img(img_path, color_mode='rgb', target_size=(240, 240))
+                img_contents = compute_contents(img_tfd, model)
 
-            efnetv2_score = (1 - distance.cdist([contents[i]], [contents[j]], 'cosine').item()) * 100 # * 15
-            efnetv2_scores[i, j] = efnetv2_score
+                contents.append(img_contents)
 
-    # todo: save scores
-    # result_pth = "results/image_statistics.json"
-    # result_pth = Path.cwd() / result_pth
-    # result_pth.parent.mkdir(parents=True, exist_ok=True)
+        n_images = len(img_paths)
+        n_neighbors = N_NEIGHBORS
+        efnetv2_scores = np.full((n_images, n_images), -np.inf)
 
-    # with open(result_pth, "w") as write_file:
-    #     json.dump(data, write_file, indent=2, ensure_ascii=False)
+        for i, img_name in enumerate(tqdm(img_paths, desc="EFNETV2 similarities", unit="img&nbrs")):
+            for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):
+                if i == j:
+                    if j+1 == MAX_IMAGES:
+                        break
+                    else:
+                        continue
+
+                efnetv2_score = (1 - distance.cdist([contents[i]], [contents[j]], 'cosine').item()) * 100 # * 15
+                efnetv2_scores[i, j] = efnetv2_score
+
+        # save scores after computation
+        save_results_versioned(paths_cfg, efnetv2_scores, save_file_base, save_method="npz")
 
     return efnetv2_scores
 
@@ -108,9 +106,8 @@ def compute_imgs_contents(target_path, recompute=False):
             "img_paths": [],
             "contents": []
         }
-        for i, img_name in enumerate(img_paths):
+        for i, img_path in enumerate(img_paths):
             # todo: compute times
-            img_path = dataset_path / img_name
             img_tfd = preprocessing.image.load_img(img_path, color_mode='rgb', target_size=(240, 240))
             img_contents = compute_contents(img_tfd, model)
 
@@ -196,10 +193,10 @@ def compute_similarities(img_paths, n_neighbors):
     return imgs_stats
 
 
-def get_scores_json(dataset_stats):
-    n_images = dataset_stats["num_images"]
+def get_scores_json(method_stats):
+    n_images = method_stats["num_images"]
     scores = np.ones((n_images, n_images)) * (-1)
-    img_stats_data = dataset_stats["statistics"]
+    img_stats_data = method_stats["statistics"]
 
     for stat in img_stats_data:
         i = stat["id_1"]
@@ -212,6 +209,7 @@ def get_scores_json(dataset_stats):
 
 
 def print_scores(dataset_stats):
+    print("Printing Efnetv2 scores:")
     n_imgs = dataset_stats["num_images"]
     scores = get_scores_json(dataset_stats)
     # avg_time = 0
@@ -226,6 +224,7 @@ def print_scores(dataset_stats):
 # endregion
 
 if __name__ == "__main__":
+    method_name = "Efnetv2"
     dataset_path = Path(DATASET_PATH)
     print(f"Dataset_path: {dataset_path}")
 
@@ -239,24 +238,30 @@ if __name__ == "__main__":
         max_idx = min(len(img_paths), MAX_IMAGES)
         img_paths = img_paths[:max_idx]
 
+    paths_cfg = {
+        "dataset_root": DATASET_ROOT,
+        "dataset_path": DATASET_PATH,
+        "results_root": RESULTS_ROOT
+    }
+
     scores = []
-    viewer = ImageViewer(img_paths, scores, mode='dual', tool_name="Sift")
+    viewer = ImageViewer(img_paths, scores, mode='dual', tool_name=method_name)
 
     method_stats = {}
-    file_version_idx = 1
-    file_name_base = "efnetv2_stats"
+    file_name_base = "efnetv2_stats_experimental"
+    ver_idx = None
 
-    f_suffix = "" if file_version_idx == 0 else f"_{file_version_idx}"
-    imgs_stats_path = Path(f"data/{file_name_base}{f_suffix}.json")
+    if not RECOMPUTE:
+        method_stats = load_results_versioned(paths_cfg, file_name_base, ver_idx=ver_idx, load_method="json")
 
-    if imgs_stats_path.exists() and not OVERRIDE_JSON:
-        with open(imgs_stats_path, "r", encoding="utf-8") as f:
-            method_stats = json.load(f)
+    if method_stats:
         print_scores(method_stats)
+        viewer.scores = get_scores_json(method_stats)
     else:
         method_stats = compute_similarities(img_paths, N_NEIGHBORS)
         if SAVE_STATS:
-            save_path = save_json_versioned(imgs_stats_path, file_version_idx, method_stats, override=OVERRIDE_JSON)
+            save_path = save_results_versioned(paths_cfg, method_stats, file_name_base, save_method="json",
+                                               override_last=OVERRIDE)
             print(f"Saved new data as: {save_path}")
 
     plt.ioff()

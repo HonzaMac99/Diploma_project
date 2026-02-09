@@ -1,30 +1,28 @@
-import numpy as np
-import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 import skimage
-from PIL import Image, ImageOps
-import piexif
 import time
-import os
-import json
-from pathlib import Path
-from datetime import datetime, timezone
-from brisque import BRISQUE
 from tqdm import tqdm
 import cv2
 
+from brisque import BRISQUE
+
 from utils import *
 
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30"
+DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
+RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
+
+MAX_IMAGES = 3 # maximum number of images to process
 IMG_NUM_RES = 6    # orig_res = [3000 x 4000] --> [375 x 500] (4)
 
-SAVE_STATS = False
-OVERRIDE_JSON = True
-SAVE_SCORE_EXIF = True
 SHOW_IMAGES = True
-MAX_IMAGES = 3 # maximum number of images to process
+SAVE_SCORE_EXIF = True
+
+RECOMPUTE = False
+SAVE_STATS = True
+OVERRIDE = True
 
 _brisque_obj = None
 
@@ -35,27 +33,34 @@ def get_brisque():
     return _brisque_obj
 
 
-def compute_brisque_scores(dataset_path : Path, img_paths : list):
-    brisque_obj = get_brisque()
-    scores = []
+def compute_brisque_scores(paths_cfg, img_paths):
+    save_file_base = "brisque_scores"
 
-    # iterator = tqdm(img_files, desc="BRISQUE", unit="img") if show_progress else img_files
-    for img_path in tqdm(img_paths, desc="BRISQUE", unit="img"):
-        img = Image.open(img_path)
-        img = ImageOps.exif_transpose(img)  # apply EXIF orientation
-        img = np.array(img)
+    # ver_idx = 0
+    scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
 
-        dsampl_lvl = 3  # 1 -> 6s; 2 -> 1.65s; 3 -> 0.5s; 4 -> 0.16s per image
-        img_new_h = img.shape[0] // 2 ** dsampl_lvl
-        img_new_w = img.shape[1] // 2 ** dsampl_lvl
-        img_norm = img.astype(np.float32) / 255.0 # torch.tensor(img) / 255.0
-        img_tfd = skimage.transform.resize_local_mean(img_norm, output_shape=[img_new_h, img_new_w])
-        # local mean is the simplest method that KEEPS STATISTICS, so the IQA is more or less unbiased
-        # we don't use cv2.resize, because interpolation can create artifacts and bias the img statistics
+    if scores is None or len(scores) != len(img_paths):
+        brisque_obj = get_brisque()
+        scores = []
 
-        scores.append(brisque_obj.score(img_tfd))
+        # iterator = tqdm(img_files, desc="BRISQUE", unit="img") if show_progress else img_files
+        for img_path in tqdm(img_paths, desc="BRISQUE", unit="img"):
+            img = Image.open(img_path)
+            img = ImageOps.exif_transpose(img)  # apply EXIF orientation
+            img = np.array(img)
 
-    # todo: save scores
+            dsampl_lvl = 3  # 1 -> 6s; 2 -> 1.65s; 3 -> 0.5s; 4 -> 0.16s per image
+            img_new_h = img.shape[0] // 2 ** dsampl_lvl
+            img_new_w = img.shape[1] // 2 ** dsampl_lvl
+            img_norm = img.astype(np.float32) / 255.0 # torch.tensor(img) / 255.0
+            img_tfd = skimage.transform.resize_local_mean(img_norm, output_shape=[img_new_h, img_new_w])
+            # local mean is the simplest method that KEEPS STATISTICS, so the IQA is more or less unbiased
+            # we don't use cv2.resize, because interpolation can create artifacts and bias the img statistics
+
+            scores.append(brisque_obj.score(img_tfd))
+
+        # save scores after computation
+        save_results_versioned(paths_cfg, scores, save_file_base, save_method="npz")
 
     return scores
 
@@ -114,9 +119,7 @@ def compute_scores(img_paths):
     img_stats_list = []  # list to store all data
 
     # print("Computing scores:", end="")
-    for img_path in img_paths:
-        img_idx = viewer.idx1
-
+    for i, img_path in enumerate(img_paths):
         img_raw = Image.open(img_path)
         img_rot = ImageOps.exif_transpose(img_raw)  # apply EXIF orientation
 
@@ -130,7 +133,7 @@ def compute_scores(img_paths):
         viewer.scores.append(b_scores_resl[0])
 
         scores_txt = [f"{x:>4.2f}" for x in b_scores_resl]
-        print(f"{img_idx + 1}: scores: {scores_txt}")
+        print(f"{i + 1}: scores: {scores_txt}")
 
         data = {
             "scores_rot": b_scores_resl,
@@ -140,7 +143,7 @@ def compute_scores(img_paths):
         }
 
         img_stats = {
-            "id": img_idx,
+            "id": i,
             "img": str(img_path),
             "brisque_score": b_scores_resl[0],
             "resolution": img_rot.shape,
@@ -152,7 +155,8 @@ def compute_scores(img_paths):
 
         if np.array_equal(img_raw, img_rot):
             b_scores_raw.append(b_scores_resl)
-            print(f"           (no rotation)")
+            print(f"   (no rotation)")
+            print("--------------------------------")
         else:
             b_scores_raw_resl, b_times_raw = brisque_eval(img_raw)
             b_scores_raw.append(b_scores_raw_resl)
@@ -165,13 +169,13 @@ def compute_scores(img_paths):
             scores_diff_txt = [f"{x:>4.2f}" for x in scores_diff]
             print(f"    (raw): {scores_raw_txt}")
             print(f"   (diff): {scores_diff_txt}")
-            print("")
-
-        if SHOW_IMAGES:
-            viewer.show_current(interactive=False)
+            print("--------------------------------")
 
         img_stats_list.append(img_stats)
-        viewer.idx1 = (viewer.idx1 + 1) % viewer.n_images
+
+        if SHOW_IMAGES:
+            viewer.idx1 = i
+            viewer.show_current(interactive=False)
 
     dataset_stats = {
         "description": "BRISQUE statistics of dataset images computed across multiple resolutions",
@@ -182,17 +186,15 @@ def compute_scores(img_paths):
         "statistics": img_stats_list
     }
 
-    # result_pth = "results/image_statistics.json"
-    # result_pth = Path.cwd() / result_pth
-    # result_pth.parent.mkdir(parents=True, exist_ok=True)
-
-    # with open(result_pth, "w") as write_file:
-    #     json.dump(data, write_file, indent=2, ensure_ascii=False)
-
     return dataset_stats
 
 
+def get_scores_json(method_stats):
+    return [x["data"]["scores_rot"][0] for x in method_stats["statistics"]]
+
+
 def print_scores(dataset_stats):
+    print("Printing Brisque scores:")
     n_imgs = dataset_stats["num_images"]
     n_resls = dataset_stats["num_resolutions"]
     times = np.zeros(n_resls)
@@ -202,7 +204,8 @@ def print_scores(dataset_stats):
         print(f"{i + 1}: scores: {scores_txt}")
 
         if not img_stats_data["scores_raw"]:
-            print(f"           (no rotation)")
+            print(f"   (no rotation)")
+            print("--------------------------------")
         else:
             scores_diff = [img_stats_data["scores_rot"][i] - img_stats_data["scores_raw"][i] for i in range(n_resls)]
 
@@ -210,7 +213,7 @@ def print_scores(dataset_stats):
             scores_diff_txt = [f"{x:>5.2f}" for x in scores_diff]
             print(f"    (raw): {scores_raw_txt}")
             print(f"   (diff): {scores_diff_txt}")
-            print("")
+            print("--------------------------------")
 
         times += img_stats_data["times_rot"]
 
@@ -218,11 +221,10 @@ def print_scores(dataset_stats):
     print(f"Average times:")
     for i in range(n_resls):
         print(f"  [{4000//2**i : >4}, {3000//2**i : >4}]: {times[i]:>8.4f} s")
-
-
 # endregion
 
 if __name__ == "__main__":
+    method_name = "Brisque"
     dataset_path = Path(DATASET_PATH)
     print(f"Dataset_path: {dataset_path}")
 
@@ -236,24 +238,30 @@ if __name__ == "__main__":
         max_idx = min(len(img_paths), MAX_IMAGES)
         img_paths = img_paths[:max_idx]
 
+    paths_cfg = {
+        "dataset_root": DATASET_ROOT,
+        "dataset_path": DATASET_PATH,
+        "results_root": RESULTS_ROOT
+    }
+
     scores = []
-    viewer = ImageViewer(img_paths, scores, mode='single', tool_name="Brisque")
+    viewer = ImageViewer(img_paths, scores, mode='single', tool_name=method_name)
 
     method_stats = {}
-    file_version_idx = 1
-    file_name_base = "brisque_stats"
+    file_name_base = "brisque_stats_experimental"
+    ver_idx = None
 
-    f_suffix = "" if file_version_idx == 0 else f"_{file_version_idx}"
-    dataset_stats_path = Path(f"results/{file_name_base}{f_suffix}.json")
+    if not RECOMPUTE:
+        method_stats = load_results_versioned(paths_cfg, file_name_base, ver_idx=ver_idx, load_method="json")
 
-    if dataset_stats_path.exists() and not OVERRIDE_JSON:
-        with open(dataset_stats_path, "r", encoding="utf-8") as f:
-            method_stats = json.load(f)
+    if method_stats:
         print_scores(method_stats)
+        viewer.scores = get_scores_json(method_stats)
     else:
         method_stats = compute_scores(img_paths)
         if SAVE_STATS:
-            save_path = save_json_versioned(dataset_stats_path, file_version_idx, method_stats, override=OVERRIDE_JSON)
+            save_path = save_results_versioned(paths_cfg, method_stats, file_name_base, save_method="json",
+                                               override_last=OVERRIDE)
             print(f"Saved new data as: {save_path}")
 
     plt.ioff()

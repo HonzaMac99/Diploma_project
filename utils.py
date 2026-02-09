@@ -1,179 +1,135 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+
 from PIL import Image, ImageOps
-import json
-import hashlib
-from pathlib import Path
-from datetime import datetime
-import sys
 import piexif
 
-RESULTS_ROOT = Path.home() / "Edu/m5/Projekt_D/projekt_testing/results"
-
-# todo: refine this prototype
+from pathlib import Path
+import json
+from datetime import datetime, timezone
+import hashlib
+# DO NOT DELETE ABOVE
 
 # region Saving and loading
-def save_scores(
-        dataset_path,
-        dataset_root,
-        results_root,
-        tool_name,
-        results,
-        save_method="json",
-        override=False
-):
+
+def save_results_versioned(paths_cfg, results, file_name_base, save_method="json", override_last=True):
     """
     Prepare a directory for a dataset located under a common dataset root.
     Dir name corresponding to the dataset is derived from the relative path, ex.: coco/train2017/ -> coco_train2017
     """
-
-    dataset_path = Path(dataset_path).expanduser().resolve()
-    data_root = Path(dataset_root).expanduser().resolve()
-    results_root = Path(results_root).expanduser().resolve()
+    dataset_root = Path(paths_cfg["dataset_root"]).expanduser().resolve()
+    dataset_path = Path(paths_cfg["dataset_path"]).expanduser().resolve()
+    results_root = Path(paths_cfg["results_root"]).expanduser().resolve()
 
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset path does not exist: {dataset_path}")
 
-    if not dataset_path.is_relative_to(data_root):
-        raise ValueError(f"Dataset path {dataset_path} is not under data root {data_root}")
+    if not dataset_path.is_relative_to(dataset_root):
+        raise ValueError(f"Dataset path {dataset_path} is not under data root {dataset_root}")
 
     # --- dataset name from relative path ---
-    relative_parts = dataset_path.relative_to(data_root).parts
+    relative_parts = dataset_path.relative_to(dataset_root).parts
+    dataset_name = "_".join(relative_parts[-3:]) # cap the name length just to 3 parts (no error for short arrays)
+
+    # # --- stable identity hash ---
+    # dataset_hash = hashlib.sha1(
+    #     str(dataset_path).encode("utf-8")
+    # ).hexdigest()[:8]
+    #
+    # results_dir = Path("data") / f"{dataset_name}__{dataset_hash}"
+
+    results_dir = results_root / f"{dataset_name}"
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    results_path = results_dir / f"{file_name_base}.{save_method}"
+
+    # if no overriding, add a version suffix to the file: '_v2', '_v3' etc.
+    ver_idx = 0
+    new_path = results_path
+    while new_path.exists():
+        ver_idx += 1
+        new_path = results_path.with_name(f"{file_name_base}_v{ver_idx}.{save_method}") # changing just the file name
+
+    if override_last:
+        if ver_idx <= 1:
+            new_path = results_path
+        else:
+            new_path = results_path.with_name(f"{file_name_base}_v{ver_idx-1}.{save_method}") # changing just the file name
+
+    assert not isinstance(results, dict) or save_method == 'json', "Dict formats are only for json!"
+    assert not isinstance(results, list) or save_method == 'npz', "List formats are only for npz!"
+
+    if save_method == "json":
+        with open(str(new_path), "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+    elif save_method == "npz":
+        scores = np.asarray(results, dtype=np.float32)
+        assert scores.dtype != object, "Results contain non-numeric objects"
+        np.savez(str(new_path), scores=scores)
+    else:
+        raise ValueError(f"Save_method {save_method} is not 'json' or 'npz'")
+
+    return new_path
+
+
+def load_results_versioned(paths_cfg, file_name_base, ver_idx=None, load_method="json"):
+    """
+    Load scores for a dataset and tool. Dataset directory name is derived from the relative path to dataset_root,
+    capped to last 3 components, plus a full-path hash.
+    """
+    dataset_path = Path(paths_cfg["dataset_path"]).expanduser().resolve()
+    dataset_root = Path(paths_cfg["dataset_root"]).expanduser().resolve()
+    results_root = Path(paths_cfg["results_root"]).expanduser().resolve()
+
+    # if not dataset_path.exists():
+    #     raise FileNotFoundError(f"Dataset path does not exist: {dataset_path}")
+
+    if not dataset_path.is_relative_to(dataset_root):
+        raise ValueError(f"Dataset path {dataset_path} is not under data root {dataset_root}")
+
+    # --- dataset name from relative path ---
+    relative_parts = dataset_path.relative_to(dataset_root).parts
     dataset_name = "_".join(relative_parts[-3:]) # cap the name length just to 3 parts
 
     # # --- stable identity hash ---
     # dataset_hash = hashlib.sha1(
     #     str(dataset_path).encode("utf-8")
     # ).hexdigest()[:8]
+    #
     # results_dir = Path("data") / f"{dataset_name}__{dataset_hash}"
 
     results_dir = results_root / f"{dataset_name}"
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    if save_method == "json":
-        with results_dir.open("w", encoding="utf-8") as f:
-            json.dump(results, f, indent=2)
-    elif save_method == "npz":
-        scores = np.asarray(results, dtype=np.float32)
-        assert results.dtype != object, "Results contain non-numeric objects"
-        np.savez(f"{tool_name}_scores.npz", scores=scores)
+    results_path = results_dir / f"{file_name_base}.{load_method}"
 
+    if ver_idx is None: # just load the last version, if version not specified
+        last_ver_idx = 0
+        new_path = results_dir / f"{file_name_base}.{load_method}"
+        while new_path.exists():
+            results_path = new_path
+            last_ver_idx += 1
+            new_path = results_path.with_name(f"{file_name_base}_v{ver_idx}.{load_method}")
+    elif ver_idx > 0: # version idx corresponds to: '_v2', '_v3' etc.
+        results_path = results_dir / f"{file_name_base}_v{ver_idx}.{load_method}"
 
-def save_json_versioned(path: Path, idx, data: dict, override=False):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists() or override:
-        final_path = path
-    else:
-        # get the file name without the '_version' suffix; edge_case: idx=0 but "_" is in the string
-        file_name_base = path.stem.rsplit('_', 1)[0] if idx != 0 else path.stem
-        idx += 1
-        while True:
-            final_path = path.with_name(f"{file_name_base}_{idx}{path.suffix}")
-            if not final_path.exists():
-                break
-            idx += 1
-
-    with open(str(final_path), "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-    return final_path
-
-
-def load_scores(dataset_path, dataset_root, results_root, tool_name, load_method="json"):
-    """
-    Load scores for a dataset and tool. Dataset directory name is derived from the relative path to dataset_root,
-    capped to last 3 components, plus a full-path hash.
-    """
-    dataset_path = Path(dataset_path).expanduser().resolve()
-    data_root = Path(dataset_root).expanduser().resolve()
-    results_root = Path(results_root).expanduser().resolve()
-
-    if not dataset_path.exists():
-        raise FileNotFoundError(f"Dataset path does not exist: {dataset_path}")
-
-    if not dataset_path.is_relative_to(data_root):
-        raise ValueError(f"Dataset path {dataset_path} is not under data root {data_root}")
-
-    # --- dataset name from relative path ---
-    relative_parts = dataset_path.relative_to(data_root).parts
-    dataset_name = "_".join(relative_parts[-3:]) # cap the name length just to 3 parts
-
-    results_dir = results_root / f"{dataset_name}"
+    if not results_path.exists():
+        print(f"[Loading]: {results_path} not found")
+        return None
 
     if load_method == "json":
-        ...
+        with open(results_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data
     elif load_method == "npz":
-        data = np.load(results_dir / f"{tool_name}_scores.npz")
+        data = np.load(results_path)
+        # convert to normal dict if you want
+        results = {k: data[k] for k in data.files}
         scores = data["scores"]
+        return scores
     else:
-        print("[load_scores]: unknown method used for saving!")
-
-    return scores
-
-
-def prepare_dataset_cache(
-    dataset_path: Path,
-    data_root: Path,
-    cache_root: Path = Path.home() / ".cache" / "nima",
-    tool_name: str = "nima",
-    tool_version: str | None = None,
-) -> Path:
-    """
-    Prepare a cache directory for a dataset located under a common data root.
-
-    Dataset name is derived from the relative path:
-    e.g. coco/train2017 -> coco_train2017
-    """
-
-    dataset_path = Path(dataset_path).expanduser().resolve()
-    data_root = Path(data_root).expanduser().resolve()
-    cache_root = Path(cache_root).expanduser().resolve()
-
-    if not dataset_path.exists():
-        raise FileNotFoundError(f"Dataset path does not exist: {dataset_path}")
-
-    if not dataset_path.is_relative_to(data_root):
-        raise ValueError(
-            f"Dataset path {dataset_path} is not under data root {data_root}"
-        )
-
-    # --- dataset name from relative path ---
-    relative_parts = dataset_path.relative_to(data_root).parts
-    dataset_name = "_".join(relative_parts)
-
-    # --- stable identity hash ---
-    dataset_hash = hashlib.sha1(
-        str(dataset_path).encode("utf-8")
-    ).hexdigest()[:8]
-
-    cache_dir = cache_root / f"{dataset_name}__{dataset_hash}"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-
-    # --- metadata ---
-    meta_path = cache_dir / "meta.json"
-
-    if not meta_path.exists():
-        meta = {
-            "schema_version": 1,
-            "dataset": {
-                "name": dataset_name,
-                "path": str(dataset_path),
-                "relative_to": str(data_root),
-                "hash": dataset_hash,
-            },
-            "run": {
-                "tool": tool_name,
-                "tool_version": tool_version,
-                "created_at": datetime.utcnow().isoformat() + "Z",
-                "python": sys.version.split()[0],
-            },
-        }
-
-        with meta_path.open("w", encoding="utf-8") as f:
-            json.dump(meta, f, indent=2)
-
-    return cache_dir
+        raise ValueError(f"Unsupported file type: {load_method}")
 
 
 def save_exif_comment(image_path, quality_score):
@@ -222,14 +178,8 @@ def load_exif_comment(img_path):
 class ImageViewer:
     """
     Interactive image viewer for single and dual image evaluation
-    Single image -> aesthetic and technical quality evaluation
-    Dual image -> structural and content similarity evaluation
-
-    Usage:
-        viewer = ImageViewer(img_paths, scores, mode='single', tool_name="EfficientNetV2")
-        fig = plt.figure()
-        fig.canvas.mpl_connect('key_press_event', viewer.on_key)
-        viewer.show_current(interactive=False)
+    Single image -> aesthetic and technical quality
+    Dual image -> structural and content similarity
     """
 
     def __init__(self, img_paths, scores, mode='single', tool_name=""):
@@ -269,8 +219,7 @@ class ImageViewer:
             raise ValueError("mode must be 'single' or 'dual'")
 
         # disable 's' key shortcut to allow navigating the second image view with 'w' and 's'
-        if mode == 'dual':
-            mpl.rcParams['keymap.save'] = []
+        mpl.rcParams['keymap.save'] = []
 
     def clear_texts(self):
         for txt in self.custom_texts:
@@ -344,8 +293,11 @@ class ImageViewer:
                         color='white', fontsize=8, fontweight='bold',
                         bbox=dict(facecolor='black', alpha=0.6, pad=3),
                         transform=ax.transAxes)
+
         if self.multi_tools:
             self.fig.subplots_adjust(top=0.8)  # leave space for text
+
+            # create texts with sift and efnetv2 scores and the image ids
             t1 = self.fig.text(
                 0.5, 0.95,
                 f"{self.tool_names[2]:<8}: {self.scores[self.tool_names[2]][idx1][idx2]:7.2f}",
@@ -362,6 +314,7 @@ class ImageViewer:
                 ha='center', fontsize=14, fontweight='bold'
             )
             self.custom_texts = [t1, t2, t3]
+
             self.fig.subplots_adjust(top=0.95, bottom=0.1)
             plt.tight_layout(pad=2.0)
         else:
