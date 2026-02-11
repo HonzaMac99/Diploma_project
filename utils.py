@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+from matplotlib.patches import Rectangle
+import math
 
 from PIL import Image, ImageOps
 import piexif
@@ -201,12 +203,14 @@ class ImageViewer:
         self.tool_name = tool_name
 
         self.n_images = len(img_paths)
+        self.n_frames = self.n_images
         self.idx1, self.idx2 = 0, 1  # dual-view indices
 
         # for evaluation with multiple tools at once
         self.multi_tools = isinstance(scores, dict)
         self.tool_names = list(self.scores.keys()) if self.multi_tools else [tool_name]
         self.custom_texts = [] # Keep track of texts with all scores in dual-view
+        self.selection = [0.0 for i in range(len(img_paths))]
 
         # Create figure and axes depending on mode
         if mode == 'single':
@@ -215,8 +219,11 @@ class ImageViewer:
         elif mode == 'dual':
             self.fig, self.axes = plt.subplots(1, 2)
             # self.fig, self.axes = plt.subplots(1, 2, figsize=(12, 6))
+        elif mode == 'select':
+            self.n_frames = math.ceil(len(img_paths) / 16)
+            self.fig, self.axes = plt.subplots(4, 4, figsize=(8, 8))
         else:
-            raise ValueError("mode must be 'single' or 'dual'")
+            raise ValueError("mode must be 'single', 'dual', 'select'")
 
         # disable 's' key shortcut to allow navigating the second image view with 'w' and 's'
         mpl.rcParams['keymap.save'] = []
@@ -225,6 +232,9 @@ class ImageViewer:
         for txt in self.custom_texts:
             txt.remove()
         self.custom_texts = []
+
+    def update_selection(self, selection):
+        self.selection = selection
 
     # ----------------------------
     # Single-view rendering with scores
@@ -246,7 +256,7 @@ class ImageViewer:
         self.ax.clear()
         self.ax.imshow(img)
         self.ax.axis("off")
-        self.ax.set_title(f"{self.tool_name} score: {score}   [{self.idx1+1}/{self.n_images}]")
+        self.ax.set_title(f"{self.tool_name} score: {score}   [{self.idx1+1}/{self.n_frames}]")
 
         # Text under the image
         self.ax.text(
@@ -293,11 +303,8 @@ class ImageViewer:
                         color='white', fontsize=8, fontweight='bold',
                         bbox=dict(facecolor='black', alpha=0.6, pad=3),
                         transform=ax.transAxes)
-
         if self.multi_tools:
-            self.fig.subplots_adjust(top=0.8)  # leave space for text
-
-            # create texts with sift and efnetv2 scores and the image ids
+            # create texts with both (sift, efnetv2) similarity scores + both image ids at the bottom
             t1 = self.fig.text(
                 0.5, 0.95,
                 f"{self.tool_names[2]:<8}: {self.scores[self.tool_names[2]][idx1][idx2]:7.2f}",
@@ -310,13 +317,14 @@ class ImageViewer:
             )
             t3 = self.fig.text(
                 0.5, 0.05,
-                f"[{idx1 + 1}, {idx2 + 1} | {self.n_images}]",
+                f"[{idx1 + 1}, {idx2 + 1} | {self.n_frames}]",
                 ha='center', fontsize=14, fontweight='bold'
             )
             self.custom_texts = [t1, t2, t3]
 
-            self.fig.subplots_adjust(top=0.95, bottom=0.1)
-            plt.tight_layout(pad=2.0)
+            self.fig.subplots_adjust(top=0.95, bottom=0.1) # leave space for text
+            # plt.tight_layout(pad=2.0)
+            plt.tight_layout(rect=(0.0, 0.1, 1.0, 0.95))
         else:
             if idx1 < len(self.scores) and idx2 < len(self.scores):
                 score = self.scores[idx1][idx2]
@@ -324,9 +332,74 @@ class ImageViewer:
             else:
                 score = "---"
             self.fig.suptitle(
-                f"{self.tool_name} score: {score}   [{idx1+1}, {idx2+1} | {self.n_images}]",
+                f"{self.tool_name} score: {score}   [{idx1+1}, {idx2+1} | {self.n_frames}]",
                 fontsize=14
             )
+
+        if interactive:
+            self.fig.canvas.draw_idle()
+        else:
+            self.fig.canvas.draw()
+            plt.show()
+            plt.pause(0.001)
+
+    # ----------------------------
+    # Selection rendering with colored frames depicting the selection
+    # ----------------------------
+    def show_selection(self, interactive=False):
+        # start_idx = (self.idx1 // 16) + (self.idx1 % 16) # first img idx at the 4x4 frame
+        start_idx = (self.idx1 * 16) % self.n_images
+
+
+        self.clear_texts()
+
+        frame_colors = ['limegreen' if self.selection[i] else 'none' for i in range(self.n_images)]
+        img_idx = start_idx
+        for ax in self.axes.flat:
+            print(f"Plotting image {img_idx+1}")
+            if img_idx < self.n_images:
+                f_color = frame_colors[img_idx]
+                img_path = self.img_paths[img_idx]
+
+                with Image.open(img_path) as img:
+                    img = ImageOps.exif_transpose(img)  # apply EXIF orientation
+                    img = np.asarray(img)
+            else:
+                # remove everything from the ax frame and make it invisible
+                ax.clear()
+                ax.set_xticks([])
+                ax.set_yticks([])
+                for spine in ax.spines.values():
+                    spine.set_edgecolor("white")
+                continue
+                # f_color = "none"
+                # img = np.zeros((64, 64, 3)) # white image (float 1.0 represents is white)
+
+            img_idx += 1
+
+            ax.clear()
+            ax.imshow(img)
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+            h, w = img.shape[:2]
+            rect = Rectangle(
+                (0, 0), w, h,
+                linewidth=6,
+                edgecolor=f_color,
+                facecolor='none'
+            )
+            ax.add_patch(rect)
+
+        t1 = self.fig.text(0.5, 0.95, f"Images {start_idx+1} - {min(start_idx+16, self.n_images)}",
+                           ha='center', fontsize=14, fontweight='bold', family="monospace"
+                           )
+        t2 = self.fig.text(0.5, 0.05, f"[{self.idx1+1}/{self.n_frames}]",
+                           ha='center', fontsize=14, fontweight='bold'
+                           )
+        self.custom_texts = [t1, t2]
+        # self.fig.subplots_adjust(top=0.8, bottom=0.1) # leave space for text
+        plt.tight_layout(rect=(0.0, 0.1, 1.0, 0.95))
 
         if interactive:
             self.fig.canvas.draw_idle()
@@ -341,8 +414,12 @@ class ImageViewer:
     def show_current(self, interactive=False):
         if self.mode == 'single':
             self.show_single(interactive=interactive)
-        else:
+        elif self.mode == 'dual':
             self.show_dual(interactive=interactive)
+        elif self.mode == 'select':
+            self.show_selection(interactive=interactive)
+        else:
+            raise ValueError("mode must be 'single', 'dual', 'select'")
 
     # ----------------------------
     # Key callback handler
@@ -353,14 +430,14 @@ class ImageViewer:
             return
 
         if event.key == "d":
-            self.idx1 = (self.idx1 + 1) % self.n_images
+            self.idx1 = (self.idx1 + 1) % self.n_frames
         elif event.key == "a":
-            self.idx1 = (self.idx1 - 1) % self.n_images
+            self.idx1 = (self.idx1 - 1) % self.n_frames
         elif self.mode == 'dual':
             if event.key == "w":
-                self.idx2 = (self.idx2 + 1) % self.n_images
+                self.idx2 = (self.idx2 + 1) % self.n_frames
             elif event.key == "s":
-                self.idx2 = (self.idx2 - 1) % self.n_images
+                self.idx2 = (self.idx2 - 1) % self.n_frames
 
         self.show_current(interactive=True)
 # endregion

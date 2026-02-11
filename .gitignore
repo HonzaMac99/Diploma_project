@@ -72,6 +72,9 @@ datasets/
 *.npz
 *.npy
 
+# Saved metadata
+results/
+
 # ======================
 # OpenCV / media
 # ======================

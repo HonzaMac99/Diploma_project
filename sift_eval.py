@@ -9,10 +9,11 @@ DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/
 RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
-MAX_IMAGES = 5 # maximum number of images to process (for debugging)
+MAX_IMAGES = 12 # maximum number of images to process (for debugging)
 N_NEIGHBORS = 20
 N_SIFT_FEATS = 1000
 IMG_NUM_RES = 1    # orig_res = [3000 x 4000] --> [224, 244] (fixed nima input size)
+SIFT_RES = 1024  # 2048, 1024, 512, 256, 128, 64, 32
 
 SHOW_IMAGES = True
 SAVE_SCORE_EXIF = False

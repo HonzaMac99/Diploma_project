@@ -14,14 +14,14 @@ DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/
 RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
-MAX_IMAGES = 3 # maximum number of images to process
+MAX_IMAGES = None # 3 # maximum number of images to process
 IMG_NUM_RES = 6    # orig_res = [3000 x 4000] --> [375 x 500] (4)
 
-SHOW_IMAGES = True
+SHOW_IMAGES = False
 SAVE_SCORE_EXIF = True
 
 RECOMPUTE = False
-SAVE_STATS = True
+SAVE_STATS = False
 OVERRIDE = True
 
 _brisque_obj = None
@@ -67,7 +67,7 @@ def compute_brisque_scores(paths_cfg, img_paths):
 # region Other experimental functions
 
 def brisque_eval(img):
-    # plt.ioff()
+    plt.ioff()
 
     brisque_obj = get_brisque()
     b_scores_resls = []
@@ -101,8 +101,10 @@ def brisque_eval(img):
         end_t = time.time()
         times.append(end_t-start_t)
 
-        # plt.imshow(img_tfd)
-        # plt.axis("off")
+        # fig, ax = plt.subplots()
+        # ax.clear()
+        # ax.imshow(img_tfd)
+        # ax.axis("off")
         # plt.show()
         # print(f"[{img_h / 2**i}, {img_w / 2**i}]: {end_t-start_t:.4f} s")
 
@@ -120,6 +122,7 @@ def compute_scores(img_paths):
 
     # print("Computing scores:", end="")
     for i, img_path in enumerate(img_paths):
+        # img_path = img_paths[61]
         img_raw = Image.open(img_path)
         img_rot = ImageOps.exif_transpose(img_raw)  # apply EXIF orientation
 
@@ -245,7 +248,8 @@ if __name__ == "__main__":
     }
 
     scores = []
-    viewer = ImageViewer(img_paths, scores, mode='single', tool_name=method_name)
+    if SHOW_IMAGES:
+        viewer = ImageViewer(img_paths, scores, mode='single', tool_name=method_name)
 
     method_stats = {}
     file_name_base = "brisque_stats_experimental"
@@ -263,6 +267,9 @@ if __name__ == "__main__":
             save_path = save_results_versioned(paths_cfg, method_stats, file_name_base, save_method="json",
                                                override_last=OVERRIDE)
             print(f"Saved new data as: {save_path}")
+
+    if not SHOW_IMAGES:
+        viewer = ImageViewer(img_paths, scores, mode='single', tool_name=method_name)
 
     plt.ioff()
     viewer.fig.canvas.mpl_connect('key_press_event', lambda event: viewer.on_key(event))

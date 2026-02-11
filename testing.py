@@ -4,57 +4,32 @@ from matplotlib.patches import Rectangle
 from PIL import Image, ImageOps
 from pathlib import Path
 
+from utils import ImageViewer
+
 # DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/LIVEwild/Images/trainingImages/"
 DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
 
-def plot_images_grid(img_files, frame_colors, start_idx):
-    fig, axes = plt.subplots(4, 4, figsize=(8, 8))
+if __name__ == "__main__":
 
-    for ax in axes.flat:
-        if start_idx < len(img_files):
-            f_color = frame_colors[start_idx]
-            img_path = img_files[start_idx]
+    dataset_path = Path(DATASET_PATH)
+    img_paths = sorted(
+        img_file for img_file in dataset_path.iterdir()
+        if img_file.is_file() and img_file.suffix.lower() in IMG_EXTS
+    )
 
-            with Image.open(img_path) as img:
-                img = ImageOps.exif_transpose(img)  # apply EXIF orientation
-                img = np.asarray(img)
-        else:
-            color = "black"
-            img = np.zeros((64, 64, 3))
-        start_idx += 1
+    sel_percent = 10
+    n_bins = 100 // sel_percent
+    selection = [1.0 if i % n_bins == 0 else 0.0 for i in range(len(img_paths))]
 
-        ax.imshow(img)
-        ax.set_xticks([])
-        ax.set_yticks([])
+    scores = []
+    viewer = ImageViewer(img_paths, scores, mode='select')
+    viewer.update_selection(selection)
 
-        h, w = img.shape[:2]
-        rect = Rectangle(
-            (0, 0), w, h,
-            linewidth=8,
-            edgecolor=f_color,
-            facecolor='none'
-        )
-        ax.add_patch(rect)
-
-    plt.tight_layout()
-    plt.show()
-    # plt.close(fig)
-
-
-dataset_path = Path(DATASET_PATH)
-img_paths = sorted(
-    img_file for img_file in dataset_path.iterdir()
-    if img_file.is_file() and img_file.suffix.lower() in IMG_EXTS
-)
-
-colors = ['green' if i % 2 == 0 else 'red' for i in range(len(img_paths))]
-
-count = 0
-while count < len(img_paths):
-    plot_images_grid(img_paths, colors, count)
-    count += 16
+    plt.ioff()
+    viewer.fig.canvas.mpl_connect('key_press_event', lambda event: viewer.on_key(event))
+    viewer.show_current(interactive=False)
 
 
 
