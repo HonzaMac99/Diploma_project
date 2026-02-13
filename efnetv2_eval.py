@@ -29,6 +29,16 @@ RECOMPUTE = False
 OVERRIDE = True
 
 
+# inspired by LB
+def compute_contents(img, model):
+    t = preprocessing.image.img_to_array(img)
+    t = np.expand_dims(t, axis=0)
+    t = preprocess_input(t)
+    f = model.predict(t, verbose=0, batch_size=8)
+    f = f.tolist()
+    return f[0]
+
+
 def compute_efnetv2_similarities(paths_cfg, img_paths):
     save_file_base = "efnetv2_scores"
 
@@ -50,6 +60,7 @@ def compute_efnetv2_similarities(paths_cfg, img_paths):
 
             for i, img_path in enumerate(tqdm(img_paths, desc="EFNETV2 contents", unit="img")):
                 # todo: compute times
+                # todo: try different resolutions
                 img_tfd = preprocessing.image.load_img(img_path, color_mode='rgb', target_size=(240, 240))
                 img_contents = compute_contents(img_tfd, model)
 
@@ -76,14 +87,6 @@ def compute_efnetv2_similarities(paths_cfg, img_paths):
     return efnetv2_scores
 
 # region Other experimental functions
-# inspired by LB
-def compute_contents(img, model):
-    t = preprocessing.image.img_to_array(img)
-    t = np.expand_dims(t, axis=0)
-    t = preprocess_input(t)
-    f = model.predict(t, verbose=0, batch_size=8)
-    f = f.tolist()
-    return f[0]
 
 # inspired by LB
 def compute_imgs_contents(target_path, recompute=False):

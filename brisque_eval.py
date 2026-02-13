@@ -10,18 +10,19 @@ from brisque import BRISQUE
 from utils import *
 
 DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
+# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/tid2013/distorted_images"
 RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
-MAX_IMAGES = None # 3 # maximum number of images to process
+MAX_IMAGES = 10 # 3 # maximum number of images to process
 IMG_NUM_RES = 6    # orig_res = [3000 x 4000] --> [375 x 500] (4)
 
 SHOW_IMAGES = False
-SAVE_SCORE_EXIF = True
+SAVE_SCORE_EXIF = False
 
 RECOMPUTE = False
-SAVE_STATS = False
+SAVE_STATS = True
 OVERRIDE = True
 
 _brisque_obj = None
@@ -133,7 +134,8 @@ def compute_scores(img_paths):
         b_scores.append(b_scores_resl)
 
         # give the viewer just the most precise score (biggest resolution)
-        viewer.scores.append(b_scores_resl[0])
+        if SHOW_IMAGES:
+            viewer.scores.append(b_scores_resl[0])
 
         scores_txt = [f"{x:>4.2f}" for x in b_scores_resl]
         print(f"{i + 1}: scores: {scores_txt}")
@@ -201,6 +203,7 @@ def print_scores(dataset_stats):
     n_imgs = dataset_stats["num_images"]
     n_resls = dataset_stats["num_resolutions"]
     times = np.zeros(n_resls)
+    res_scores = np.zeros(n_resls)
     for i in range(n_imgs):
         img_stats_data = dataset_stats["statistics"][i]["data"]
         scores_txt = [f"{x:>5.2f}" for x in img_stats_data["scores_rot"]]
@@ -224,6 +227,10 @@ def print_scores(dataset_stats):
     print(f"Average times:")
     for i in range(n_resls):
         print(f"  [{4000//2**i : >4}, {3000//2**i : >4}]: {times[i]:>8.4f} s")
+
+    # todo: differences between times
+
+
 # endregion
 
 if __name__ == "__main__":

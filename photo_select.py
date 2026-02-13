@@ -2,7 +2,7 @@ from pathlib import Path
 import os
 import time
 
-from utils import ImageViewer
+from utils import *
 
 from brisque_eval import compute_brisque_scores
 from nima_eval import compute_nima_scores
@@ -12,9 +12,9 @@ from efnetv2_eval import compute_efnetv2_similarities
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
+# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
 # DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/LIVEwild/Images/trainingImages/"
-# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/tid2013/distorted_images"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/tid2013/distorted_images"
 
 RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
@@ -52,6 +52,15 @@ if __name__ == "__main__":
     }
     # np.random.normal(loc=50.0, scale=10.0, size=(n_images)).tolist()
 
-    viewer = ImageViewer(img_paths, scores, mode='dual')
+
+    sel_percent = 10
+    n_bins = 100 // sel_percent
+    selection = [1.0 if i % n_bins == 0 else 0.0 for i in range(len(img_paths))]
+
+    scores = []
+    viewer = ImageViewer(img_paths, scores, mode='select')
+    viewer.update_selection(selection)
+
+    plt.ioff()
     viewer.fig.canvas.mpl_connect('key_press_event', lambda event: viewer.on_key(event))
     viewer.show_current(interactive=False)

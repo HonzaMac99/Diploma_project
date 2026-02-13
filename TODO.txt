@@ -1,12 +1,12 @@
 1b) Počítat clustery, nastavit vhodné prahy
-2b) stahnout AVA dataset (?)
 3) Sift udělat rozlišení a časy
-4b) (optional)(!): zkusit integrovat něco noveho, nahradit: explicitní metody (Brisque, SIFT?) --> NN
 5) fine tuning existujících sítí na našich a dalších datasetech
 6) Integrace všeho do aplikace z přikazove řádky - důraz na jednoduchost použití, use cases
 =====================================================================
 
 Side quests:
+d) napsat README s detailním návodem použití
+
 
 Done:
 1) EfficientNetv2b1 integration - content similarity computation and display
@@ -15,4 +15,6 @@ b) put images into batches for faster computation
 2) Datasety Tid2023, LIVE + mozna AVA
 c) základní ukládání výsledků: dataset/path/to/photos/ --> path_to_photos_scores_brisque.json
 4) Celkova uprava kodu, udělat vse vic MODULARNI (15h??)
+2b) stahnout AVA dataset (?)
+4b) integrovan CLIP, dalsi to go
 
