@@ -210,7 +210,7 @@ class ImageViewer:
         self.multi_tools = isinstance(scores, dict)
         self.tool_names = list(self.scores.keys()) if self.multi_tools else [tool_name]
         self.custom_texts = [] # Keep track of texts with all scores in dual-view
-        self.selection = [0.0 for i in range(len(img_paths))]
+        self.selection = [0.0 for _ in range(len(img_paths))]
 
         # Create figure and axes depending on mode
         if mode == 'single':
@@ -347,17 +347,15 @@ class ImageViewer:
     # Selection rendering with colored frames depicting the selection
     # ----------------------------
     def show_selection(self, interactive=False):
-        # start_idx = (self.idx1 // 16) + (self.idx1 % 16) # first img idx at the 4x4 frame
-        start_idx = (self.idx1 * 16) % self.n_images
-
+        start_idx = (self.idx1 * 16) % self.n_images # self.idx1 is now idx of the frame with 16 images
 
         self.clear_texts()
 
         frame_colors = ['limegreen' if self.selection[i] else 'none' for i in range(self.n_images)]
         img_idx = start_idx
         for ax in self.axes.flat:
-            print(f"Plotting image {img_idx+1}")
             if img_idx < self.n_images:
+                print(f"Plotting image {img_idx + 1}")
                 f_color = frame_colors[img_idx]
                 img_path = self.img_paths[img_idx]
 
