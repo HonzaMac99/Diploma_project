@@ -15,7 +15,7 @@ CSV_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/jk/"
 
 # DATASET_PATH = "/datagrid/Medical/archive/notebook_backup/digital_photography/cdroms/year2019/corrected/281_namibie/"
 # CSV_PATH = "/datagrid/Medical/archive/notebook_backup/digital_photography/"
-CSV_FILE = "photo_dataset20240119"
+CSV_FILE = "photo_dataset20240119.csv"
 
 # CSV_FILE = "photo_dataset20240122train.csv"
 # photo_dataset20240122test.csv, selected_photos20240119.txt

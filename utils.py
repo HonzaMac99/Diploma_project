@@ -13,6 +13,13 @@ from datetime import datetime, timezone
 import hashlib
 # DO NOT DELETE ABOVE
 
+
+def rank_imgs(img_paths, img_scores):
+    sorted_pairs = sorted(zip(img_paths, img_scores), key=lambda x: x[1], reverse=True)
+    img_paths_sorted, img_scores_sorted = zip(*sorted_pairs)
+    return img_paths_sorted, img_scores_sorted
+
+
 # region Saving and loading
 
 def save_results_versioned(paths_cfg, results, file_name_base, save_method="json", override_last=True):
@@ -176,6 +183,20 @@ def load_exif_comment(img_path):
 # endregion
 
 # region Plotting
+
+# dummy viewer that does nothing - for preventing errors with uninitialized obj
+class NullViewer:
+    def __init__(self, *args, **kwargs):
+        self.img_paths = []
+        self.scores = []
+        self.fig = type("DummyFig", (), {"canvas": type("DummyCanvas", (), {"mpl_connect": lambda *a, **k: None})()})()
+
+    def show_current(self, *args, **kwargs):
+        pass
+
+    def on_key(self, *args, **kwargs):
+        pass
+
 
 class ImageViewer:
     """

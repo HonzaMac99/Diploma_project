@@ -10,20 +10,21 @@ from brisque import BRISQUE
 from utils import *
 
 DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
-# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/tid2013/distorted_images"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
+# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/tid2013/distorted_images"
 RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
 MAX_IMAGES = 10 # 3 # maximum number of images to process
-IMG_NUM_RES = 6    # orig_res = [3000 x 4000] --> [375 x 500] (4)
+IMG_NUM_RES = 1 # 6    # orig_res = [3000 x 4000] --> [375 x 500] (4)
 
 SHOW_IMAGES = False
+RANK_IMAGES = True
 SAVE_SCORE_EXIF = False
 
-RECOMPUTE = False
-SAVE_STATS = True
-OVERRIDE = True
+RECOMPUTE = True
+SAVE_STATS = False
+OVERRIDE = False
 
 _brisque_obj = None
 
@@ -195,7 +196,9 @@ def compute_scores(img_paths):
 
 
 def get_scores_json(method_stats):
-    return [x["data"]["scores_rot"][0] for x in method_stats["statistics"]]
+    img_paths = [x['img'] for x in method_stats['statistics']]
+    scores = [x["data"]["scores_rot"][0] for x in method_stats["statistics"]]
+    return img_paths, scores
 
 
 def print_scores(dataset_stats):
@@ -255,8 +258,11 @@ if __name__ == "__main__":
     }
 
     scores = []
-    if SHOW_IMAGES:
-        viewer = ImageViewer(img_paths, scores, mode='single', tool_name=method_name)
+    viewer = (
+        ImageViewer(img_paths, scores, mode='single', tool_name=method_name)
+        if SHOW_IMAGES
+        else NullViewer()
+    )
 
     method_stats = {}
     file_name_base = "brisque_stats_experimental"
@@ -267,7 +273,7 @@ if __name__ == "__main__":
 
     if method_stats:
         print_scores(method_stats)
-        viewer.scores = get_scores_json(method_stats)
+        viewer.img_paths, viewer.scores = get_scores_json(method_stats)
     else:
         method_stats = compute_scores(img_paths)
         if SAVE_STATS:
@@ -275,8 +281,13 @@ if __name__ == "__main__":
                                                override_last=OVERRIDE)
             print(f"Saved new data as: {save_path}")
 
+    img_paths, scores = get_scores_json(method_stats)
+
     if not SHOW_IMAGES:
         viewer = ImageViewer(img_paths, scores, mode='single', tool_name=method_name)
+
+    if RANK_IMAGES:
+        viewer.img_paths, viewer.scores = rank_imgs(viewer.img_paths, viewer.scores)
 
     plt.ioff()
     viewer.fig.canvas.mpl_connect('key_press_event', lambda event: viewer.on_key(event))
