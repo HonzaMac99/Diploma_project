@@ -15,15 +15,15 @@ IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
 WEIGHTS_PATH = Path.cwd() / "data/model.pth"
 
-MAX_IMAGES = 10 # maximum number of images to process
-# NIMA has fixed input img size: orig_res = [3000 x 4000] --> [224, 244]
+MAX_IMAGES = None # maximum number of images to process
+# NIMA has fixed input img size: orig_res = [3000, 4000] --> [224, 224]
 # turn of batch processing by setting batch_size = 1
 
-SHOW_IMAGES = True
+SHOW_IMAGES = False
 SAVE_SCORE_EXIF = False
 
-SAVE_STATS = True
-RECOMPUTE = False
+SAVE_STATS = False
+RECOMPUTE = True
 OVERRIDE = True
 
 _nima_model = None
@@ -92,7 +92,8 @@ def compute_nima_scores(paths_cfg, img_paths, batch_size = 32, cuda=True):
     save_file_base = "nima_scores"
 
     # ver_idx = 0
-    scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
+    # scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
+    scores = None
 
     if scores is None or len(scores) != len(img_paths):
         nima_model = get_nima_model()
@@ -148,15 +149,12 @@ def nima_eval(img, cuda = True):
     nima_img_transform = transforms.Compose([
         transforms.Resize(256),
         # transforms.RandomCrop(224),           # Resize and crop (as in paper)
+        # transforms.Resize((224, 224))         # Resize directly to 224x224
         transforms.CenterCrop(224),           # center crop for same scores
         transforms.ToTensor(),                # Convert to tensor and scale [0,255] -> [0,1]
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
     ])
-    # possible alternatives to try:
-    # (1) transforms.Resize((224, 224)),      # Resize directly to 224x224
-    # (2) transforms.CenterCrop(224),         # Deterministic crop instead to random
-    # todo: try these and put into report
 
     img = nima_img_transform(img)  # transform for Nima
     img = img.unsqueeze(dim=0)
@@ -301,6 +299,16 @@ if __name__ == "__main__":
         "dataset_path": DATASET_PATH,
         "results_root": RESULTS_ROOT
     }
+
+    # measuring times for batching influence on speed
+    batch_sizes = [1, 2, 16, 32, 64]
+    for b_size in batch_sizes:
+        start_t = time.time()
+        compute_nima_scores(paths_cfg, img_paths, batch_size=b_size, cuda=True)
+        end_t = time.time()
+        time_diff = end_t-start_t
+        print(f"B {b_size}: {time_diff:.4f}")
+    exit()
 
     scores = []
     viewer = ImageViewer(img_paths, scores, mode='single', tool_name=method_name)

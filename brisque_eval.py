@@ -15,15 +15,16 @@ DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/
 RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
-MAX_IMAGES = 10 # 3 # maximum number of images to process
-IMG_NUM_RES = 1 # 6    # orig_res = [3000 x 4000] --> [375 x 500] (4)
+MAX_IMAGES = 5 # [int|None] maximum number of images to process (for debugging)
+IMG_NUM_RES = 6    # 4096, 2048, 1024, 512, 256, 128
+BRISQUE_RES = 512
 
 SHOW_IMAGES = False
 RANK_IMAGES = True
 SAVE_SCORE_EXIF = False
 
-RECOMPUTE = True
-SAVE_STATS = False
+RECOMPUTE = False
+SAVE_STATS = True
 OVERRIDE = False
 
 _brisque_obj = None
@@ -51,14 +52,7 @@ def compute_brisque_scores(paths_cfg, img_paths):
             img = ImageOps.exif_transpose(img)  # apply EXIF orientation
             img = np.array(img)
 
-            dsampl_lvl = 3  # 1 -> 6s; 2 -> 1.65s; 3 -> 0.5s; 4 -> 0.16s per image
-            img_new_h = img.shape[0] // 2 ** dsampl_lvl
-            img_new_w = img.shape[1] // 2 ** dsampl_lvl
-            img_norm = img.astype(np.float32) / 255.0 # torch.tensor(img) / 255.0
-            img_tfd = skimage.transform.resize_local_mean(img_norm, output_shape=[img_new_h, img_new_w])
-            # local mean is the simplest method that KEEPS STATISTICS, so the IQA is more or less unbiased
-            # we don't use cv2.resize, because interpolation can create artifacts and bias the img statistics
-
+            img_tfd = img_resize(img, max_d=BRISQUE_RES, tf_option=1)
             scores.append(brisque_obj.score(img_tfd))
 
         # save scores after computation
@@ -74,30 +68,12 @@ def brisque_eval(img):
     brisque_obj = get_brisque()
     b_scores_resls = []
     times = []
+
+    max_dim_base = 4096
     for i in range(IMG_NUM_RES):
         start_t = time.time()
-        img_new_h = img.shape[0] // 2**i
-        img_new_w = img.shape[1] // 2**i
-        img_norm = img.astype(np.float32) / 255.0
-
-        # todo: check all transformations
-        tf_option = 1
-        if tf_option == 1: # local mean from skimage, keeps statistics
-            img_tfd = skimage.transform.resize_local_mean(img_norm, output_shape=[img_new_h, img_new_w])
-            # img_tfd = skimage.transform.resize_local_mean(img.astype(np.float32) / 255.0, output_shape=[img_new_h, img_new_w])
-        elif tf_option == 2: # pooling with np.mean
-            img_tfd = skimage.measure.block_reduce(img_norm, block_size=(2**i, 2**i, 1), func=np.mean)
-        elif tf_option == 3: # allegedly the FASTEST
-            img_tfd = cv2.resize(img_norm, (img_new_w, img_new_h), interpolation=cv2.INTER_AREA)
-            # img_tfd = cv2.resize(img.astype(np.float32), (img_new_w, img_new_h))
-        elif tf_option == 4:
-            img_t = torch.tensor(img_norm).permute(2, 0, 1).unsqueeze(0) # (1, C, H, W)
-            img_tfd = F.avg_pool2d(img_t, kernel_size=2**i)
-            img_tfd = img_tfd.squeeze(0).permute(1, 2, 0).numpy()
-        else:
-            exit(-1)
-
-        img_tfd = np.asarray(img_tfd)
+        max_dim_len = max_dim_base // 2**i
+        img_tfd = img_resize(img, max_d=max_dim_len, tf_option=1)
 
         b_scores_resls.append(brisque_obj.score(img_tfd))
         end_t = time.time()
@@ -264,13 +240,12 @@ if __name__ == "__main__":
         else NullViewer()
     )
 
-    method_stats = {}
     file_name_base = "brisque_stats_experimental"
     ver_idx = None
 
+    method_stats = {}
     if not RECOMPUTE:
         method_stats = load_results_versioned(paths_cfg, file_name_base, ver_idx=ver_idx, load_method="json")
-
     if method_stats:
         print_scores(method_stats)
         viewer.img_paths, viewer.scores = get_scores_json(method_stats)
@@ -281,13 +256,13 @@ if __name__ == "__main__":
                                                override_last=OVERRIDE)
             print(f"Saved new data as: {save_path}")
 
+    # get rid of all img_paths that doesn't have its score
     img_paths, scores = get_scores_json(method_stats)
 
     if not SHOW_IMAGES:
         viewer = ImageViewer(img_paths, scores, mode='single', tool_name=method_name)
-
     if RANK_IMAGES:
-        viewer.img_paths, viewer.scores = rank_imgs(viewer.img_paths, viewer.scores)
+        viewer.rank_imgs()
 
     plt.ioff()
     viewer.fig.canvas.mpl_connect('key_press_event', lambda event: viewer.on_key(event))

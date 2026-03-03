@@ -7,18 +7,69 @@ import math
 from PIL import Image, ImageOps
 import piexif
 
+import cv2
+import skimage
+import torch
+import torch.nn.functional as F
+
 from pathlib import Path
 import json
 from datetime import datetime, timezone
 import hashlib
 # DO NOT DELETE ABOVE
 
+# region image handling
 
-def rank_imgs(img_paths, img_scores):
-    sorted_pairs = sorted(zip(img_paths, img_scores), key=lambda x: x[1], reverse=True)
-    img_paths_sorted, img_scores_sorted = zip(*sorted_pairs)
-    return img_paths_sorted, img_scores_sorted
+# original resize inspired by LB
+def image_resize_old(image, max_d=1024):
+    height, width = image.shape[:2]
+    aspect_ratio = width / height
+    if aspect_ratio < 1:
+        new_height = max_d
+        new_width = int(max_d * aspect_ratio)
+    else:
+        new_height = int(max_d / aspect_ratio)
+        new_width = max_d
+    image = cv2.resize(image, (new_width, new_height)) # cv2.resize takes (w, h) format
+    return image
 
+# reduce the size of the image so that the longer dimension is max_d long
+def img_resize(img, max_d=1024, tf_option=1):
+    img_norm = img.astype(np.float32) / 255.0
+    img_h, img_w = img.shape[:2]
+
+    if max(img_h, img_w) <= max_d:
+        return img_norm
+
+    # sticking to max dimension length and preserves aspect ratio
+    if img_h > img_w:
+        img_new_h = max_d
+        img_new_w = int(max_d * img_w / img_h)
+    else:
+        img_new_w = max_d
+        img_new_h = int(max_d * img_h / img_w)
+
+    # pooling down-sampling rate
+    pool_r = math.ceil(max(img_w, img_h) / max_d)
+
+    if tf_option == 1: # option for best SPEED (creates artifacts)
+        img_tfd = cv2.resize(img_norm, (img_new_w, img_new_h), interpolation=cv2.INTER_AREA) # cv2.resize takes (w, h) format
+    elif tf_option == 2: # option for best STATISTICS (less biased)
+        img_tfd = skimage.transform.resize_local_mean(img_norm, output_shape=[img_new_h, img_new_w])
+    # elif tf_option == 3:  # numpy pooling
+    #     img_tfd = skimage.measure.block_reduce(img_norm, block_size=(pool_r, pool_r, 1), func=np.mean)
+    #     img_tfd = cv2.resize(img_tfd, (img_new_w, img_new_h))
+    # elif tf_option == 4:  # torch pooling
+    #     img_t = torch.tensor(img_norm).permute(2, 0, 1).unsqueeze(0)
+    #     img_tfd = F.avg_pool2d(img_t, kernel_size=pool_r, stride=pool_r)
+    #     img_tfd = img_tfd.squeeze(0).permute(1, 2, 0).numpy()
+    #     img_tfd = cv2.resize(img_tfd, (img_new_w, img_new_h))
+    else:
+        print(f"Wrong tf_option: {tf_option}")
+        return img
+
+    return np.asarray(img_tfd)
+# endregion
 
 # region Saving and loading
 
@@ -119,7 +170,7 @@ def load_results_versioned(paths_cfg, file_name_base, ver_idx=None, load_method=
         while new_path.exists():
             results_path = new_path
             last_ver_idx += 1
-            new_path = results_path.with_name(f"{file_name_base}_v{ver_idx}.{load_method}")
+            new_path = results_path.with_name(f"{file_name_base}_v{last_ver_idx}.{load_method}")
     elif ver_idx > 0: # version idx corresponds to: '_v2', '_v3' etc.
         results_path = results_dir / f"{file_name_base}_v{ver_idx}.{load_method}"
 
@@ -256,6 +307,10 @@ class ImageViewer:
 
     def update_selection(self, selection):
         self.selection = selection
+
+    def rank_imgs(self):
+        sorted_pairs = sorted(zip(self.img_paths, self.scores), key=lambda x: x[1], reverse=True)
+        self.img_paths, self.scores = zip(*sorted_pairs)
 
     # ----------------------------
     # Single-view rendering with scores

@@ -17,17 +17,17 @@ IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
 WEIGHTS_PATH = Path.cwd() / "data/efficientnetv2-b1.h5"
 
-MAX_IMAGES = 3 # maximum number of images to process (for debugging)
+MAX_IMAGES = None # [int|None] maximum number of images to process (for debugging)
 N_NEIGHBORS = 20
-IMG_NUM_RES = 1    # orig_res = [3000 x 4000] --> [224, 244] (fixed nima input size)
+# EFNETV2 has fixed input img size: orig_res = [3000 x 4000] --> [240, 240]
+EFNETV2_RES = 240
 
 SHOW_IMAGES = True
 SAVE_SCORE_EXIF = False
 
-SAVE_STATS = True
-RECOMPUTE = False
+SAVE_STATS = False
+RECOMPUTE = True
 OVERRIDE = True
-
 
 # inspired by LB
 def compute_contents(img, model):
@@ -59,9 +59,8 @@ def compute_efnetv2_similarities(paths_cfg, img_paths):
             model = EfficientNetV2B1(weights=WEIGHTS_PATH)
 
             for i, img_path in enumerate(tqdm(img_paths, desc="EFNETV2 contents", unit="img")):
-                # todo: compute times
-                # todo: try different resolutions
-                img_tfd = preprocessing.image.load_img(img_path, color_mode='rgb', target_size=(240, 240))
+
+                img_tfd = preprocessing.image.load_img(img_path, color_mode='rgb', target_size=(EFNETV2_RES, EFNETV2_RES))
                 img_contents = compute_contents(img_tfd, model)
 
                 contents.append(img_contents)
@@ -86,10 +85,83 @@ def compute_efnetv2_similarities(paths_cfg, img_paths):
 
     return efnetv2_scores
 
+
+def compute_efnetv2_similarities_v2(paths_cfg, img_paths, batch_size=32):
+    save_file_base = "efnetv2_scores"
+
+    # efnetv2_scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
+    efnetv2_scores = None
+
+    if efnetv2_scores is None or len(efnetv2_scores) != len(img_paths):
+
+        # device_str = torch.device("cuda" if torch.cuda.is_available() and cuda else "cpu")
+        device_str = '/cpu:0'
+
+        contents = []
+        batch = []
+
+        with tf.device(device_str):
+            model = EfficientNetV2B1(weights=WEIGHTS_PATH)
+
+            for img_path in tqdm(img_paths, desc="EFNETV2 contents", unit="img"):
+
+                img_tfd = preprocessing.image.load_img(
+                    img_path,
+                    color_mode='rgb',
+                    target_size=(EFNETV2_RES, EFNETV2_RES)
+                )
+
+                # convert to array
+                t = preprocessing.image.img_to_array(img_tfd)
+                t = preprocess_input(t)
+                batch.append(t)
+
+                # When batch is full → predict
+                if len(batch) == batch_size:
+                    batch_np = np.stack(batch, axis=0)  # [B, H, W, C]
+                    f_batch = model.predict(batch_np, verbose=0)
+
+                    contents.extend(f_batch.tolist())
+                    batch.clear()
+
+            # Last partial batch
+            if batch:
+                batch_np = np.stack(batch, axis=0)
+                f_batch = model.predict(batch_np, verbose=0)
+                contents.extend(f_batch.tolist())
+
+        # Convert to numpy array for faster indexing later
+        contents = np.array(contents)
+
+        n_images = len(img_paths)
+        n_neighbors = N_NEIGHBORS
+        efnetv2_scores = np.full((n_images, n_images), -np.inf)
+
+        for i in tqdm(range(n_images), desc="EFNETV2 similarities", unit="img&nbrs"):
+            for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):
+                if i == j:
+                    if j + 1 == MAX_IMAGES:
+                        break
+                    else:
+                        continue
+
+                efnetv2_score = (
+                    1 - distance.cdist([contents[i]], [contents[j]], 'cosine').item()
+                ) * 100
+
+                efnetv2_scores[i, j] = efnetv2_score
+
+        save_results_versioned(paths_cfg, efnetv2_scores, save_file_base, save_method="npz")
+
+    return efnetv2_scores
+
+
+
+
 # region Other experimental functions
 
 # inspired by LB
-def compute_imgs_contents(target_path, recompute=False):
+def compute_imgs_contents(target_path, recompute=False, target_res=240):
     path = Path(target_path)
 
     if path.exists() and not recompute:
@@ -109,10 +181,14 @@ def compute_imgs_contents(target_path, recompute=False):
             "img_paths": [],
             "contents": []
         }
+
+        times_compute = []
         for i, img_path in enumerate(img_paths):
-            # todo: compute times
-            img_tfd = preprocessing.image.load_img(img_path, color_mode='rgb', target_size=(240, 240))
+            start_t = time.time()
+            img_tfd = preprocessing.image.load_img(img_path, color_mode='rgb', target_size=(target_res, target_res))
             img_contents = compute_contents(img_tfd, model)
+            end_t = time.time()
+            times_compute.append(end_t-start_t)
 
             dataset_stats["ids"].append(i)
             dataset_stats["img_paths"].append(img_paths[i])
@@ -124,19 +200,23 @@ def compute_imgs_contents(target_path, recompute=False):
         np.savez(target_path, ids=dataset_stats["ids"],
                               img_paths=dataset_stats["img_paths"],
                               contents=dataset_stats["contents"])
-    return dataset_stats
+    return dataset_stats, times_compute
 
 # inspired by LB
 def compute_similarities(img_paths, n_neighbors):
     global viewer
     plt.ion()
 
+    target_res = EFNETV2_RES
+    times_compute = []
+
     path = Path("results/efnetv2_contents.npz")
     if path.exists():
         imgs_contents = np.load(path)["contents"]
     else:
         print("Computing EfNetV2 contents:")
-        imgs_contents = compute_imgs_contents(path)["contents"]
+        imgs_data, times_compute = compute_imgs_contents(path, target_res=target_res)
+        imgs_contents = imgs_data["contents"]
 
     print("Computing EfNetV2 similarity scores:")
     n_images = len(img_paths)
@@ -144,6 +224,7 @@ def compute_similarities(img_paths, n_neighbors):
     efnetv2_scores = np.ones((n_images, n_images)) * (-1)
     viewer.scores = efnetv2_scores
 
+    times_match = []
     for i, img_1_path in enumerate(img_paths):
         for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):
             if i == j:
@@ -151,7 +232,11 @@ def compute_similarities(img_paths, n_neighbors):
 
             img_2_path = img_paths[j]
 
+            start_t = time.time()
             efnetv2_score = (1 - distance.cdist([imgs_contents[i]], [imgs_contents[j]], 'cosine').item()) * 100 # 15
+            end_t = time.time()
+            times_match.append(end_t - start_t)
+
             efnetv2_scores[i, j] = efnetv2_score
 
             print(f"({i+1}, {j+1}) score: {efnetv2_score}")
@@ -163,11 +248,9 @@ def compute_similarities(img_paths, n_neighbors):
                 "id_2": j,
                 "img_1": str(img_1_path),
                 "img_2": str(img_2_path),
-                "efnetv2_similarity_score": efnetv2_score  # todo: list for more resolutions?
-                # todo: times?
+                "efnetv2_similarity_score": efnetv2_score,  # todo: list for more resolutions?
+                "resolution": target_res,
             }
-
-            # todo: exif?
 
             if SHOW_IMAGES:
                 viewer.idx1 = i
@@ -175,6 +258,12 @@ def compute_similarities(img_paths, n_neighbors):
                 viewer.show_current(interactive=False)
 
             img_stats_list.append(img_stats)
+
+    avg_time_detect = sum(times_compute) / len(times_compute)
+    avg_time_match = sum(times_match) / len(times_match)
+    print("-----------------------------------------")
+    print(f"{target_res}: {avg_time_detect:.4f}, {avg_time_match:.4f}")
+    print("-----------------------------------------")
 
     imgs_stats = {
         "description": "EffectiveNetV2-B1 statistics of image pairs from dataset computed across multiple resolutions",
@@ -246,6 +335,16 @@ if __name__ == "__main__":
         "dataset_path": DATASET_PATH,
         "results_root": RESULTS_ROOT
     }
+
+    # measuring times for batching influence on speed
+    batch_sizes = [1, 2, 16, 32, 64]
+    for b_size in batch_sizes:
+        start_t = time.time()
+        compute_efnetv2_similarities_v2(paths_cfg, img_paths, batch_size=b_size)
+        end_t = time.time()
+        time_diff = end_t-start_t
+        print(f"B {b_size}: {time_diff:.4f}")
+    exit()
 
     scores = []
     viewer = ImageViewer(img_paths, scores, mode='dual', tool_name=method_name)

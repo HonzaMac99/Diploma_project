@@ -9,17 +9,17 @@ DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/
 RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
-MAX_IMAGES = 12 # maximum number of images to process (for debugging)
+MAX_IMAGES = 5 # [int|None] maximum number of images to process (for debugging)
 N_NEIGHBORS = 20
 N_SIFT_FEATS = 1000
-IMG_NUM_RES = 1    # orig_res = [3000 x 4000] --> [224, 244] (fixed nima input size)
-SIFT_RES = 1024  # 2048, 1024, 512, 256, 128, 64, 32
+IMG_NUM_RES = 5  # 4096, 2048, 1024, 512, 256
+SIFT_RES = 1024
 
-SHOW_IMAGES = True
+SHOW_IMAGES = False
 SAVE_SCORE_EXIF = False
 
-SAVE_STATS = True
-RECOMPUTE = False
+SAVE_STATS = False
+RECOMPUTE = True
 OVERRIDE = True
 
 _sift = None
@@ -32,20 +32,6 @@ def get_sift_bf():
     if _bf is None:
         _bf = cv2.BFMatcher() # keypoint matcher
     return _sift, _bf
-
-
-# resize inspired by LB
-def image_resize(image, max_d=1024):
-    height, width = image.shape[:2]
-    aspect_ratio = width / height
-    if aspect_ratio < 1:
-        new_height = max_d
-        new_width = int(max_d * aspect_ratio)
-    else:
-        new_height = int(max_d / aspect_ratio)
-        new_width = max_d
-    image = cv2.resize(image, (new_width, new_height)) # cv2.resize takes (w, h) format
-    return image
 
 
 def compute_matches(descr_1, descr_2):
@@ -96,11 +82,9 @@ def compute_sift_similarities(paths_cfg, img_paths):
         descriptors = {}
         sift_scores = np.full((n_images, n_images), -np.inf)
 
-        # todo: try different resolutions
-        # todo: compute avg times
         for i, img_path in enumerate(tqdm(img_paths, desc="SIFT feats", unit="img")):
 
-            img = image_resize(cv2.imread(str(img_path)), 1024) # todo: why is he doing this? is 1024 max axis len??
+            img = img_resize(cv2.imread(str(img_path)), SIFT_RES)
             keypoints[i], descriptors[i] = sift.detectAndCompute(img, None)
 
         for i, img_name in enumerate(tqdm(img_paths, desc="SIFT matches", unit="img&nbrs")):
@@ -114,8 +98,6 @@ def compute_sift_similarities(paths_cfg, img_paths):
                 else:
                     matches = compute_matches(descriptors[i], descriptors[j])
                     sift_score = len(matches)
-
-                    # todo: find the right number of sift feats for optimal time and score credibility
                     # sift_score = compute_score(len(matches), len(keypoints[i]), len(keypoints[j]))
 
                 sift_scores[i, j] = sift_score
@@ -148,49 +130,68 @@ def compute_similarities(img_paths, n_neighbors):
     sift_scores = np.ones((n_images, n_images)) * (-1)
     viewer.scores = sift_scores
 
-    # todo: try different resolutions
-    # todo: compute avg times
+    max_dim_base = 4096 # 512
+    for k in range(IMG_NUM_RES):
+        max_dim_len = max_dim_base // 2**k
+        times_detect = []
 
-    for i, img_path in enumerate(img_paths):
+        for i, img_path in enumerate(img_paths):
+            start_t = time.time()
+            # img = img_resize(cv2.imread(img_path), max_dim_len)
+            img = Image.open(img_path)
+            img = ImageOps.exif_transpose(img)  # apply EXIF orientation
+            img = np.asarray(img)
+            img_tfd = img_resize(img, max_d=max_dim_len, tf_option=1)
+            img_uint8 = (img_tfd * 255).astype(np.uint8)
 
-        img = image_resize(cv2.imread(img_path), 1024)
-        keypoints[i], descriptors[i] = sift.detectAndCompute(img, None)
+            keypoints[i], descriptors[i] = sift.detectAndCompute(img_uint8, None)
+            end_t = time.time()
+            times_detect.append(end_t-start_t)
 
-    for i, img_1_path in enumerate(img_paths):
-        for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):
-            if i == j:
-                continue
+        times_match = []
+        for i, img_1_path in enumerate(img_paths):
+            for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):
+                if i == j:
+                    continue
 
-            matches = []
-            img_2_path = img_paths[j]
+                matches = []
+                img_2_path = img_paths[j]
 
-            if len(keypoints[i]) == 0 or len(keypoints[j]) == 0:
-                sift_score = 0
-            else:
-                matches = compute_matches(descriptors[i], descriptors[j])
-                sift_score = compute_score(len(matches), len(keypoints[i]), len(keypoints[j]))
+                if len(keypoints[i]) == 0 or len(keypoints[j]) == 0:
+                    sift_score = 0
+                else:
+                    start_t = time.time()
+                    matches = compute_matches(descriptors[i], descriptors[j])
+                    sift_score = compute_score(len(matches), len(keypoints[i]), len(keypoints[j]))
+                    end_t = time.time()
+                    times_match.append(end_t-start_t)
 
-            sift_scores[i, j] = sift_score
-            print(f"({i+1}, {j+1}) score: {sift_score}, matches: {len(matches)} / ({len(keypoints[i])}, {len(keypoints[j])})")
-            
-            # todo: also some data?
+                sift_scores[i, j] = sift_score
+                print(f"({i+1}, {j+1}) score: {sift_score}, matches: {len(matches)} / ({len(keypoints[i])}, {len(keypoints[j])})")
 
-            img_stats = {
-                "id_1": i,
-                "id_2": j,
-                "img_1": str(img_1_path),
-                "img_2": str(img_2_path),
-                "sift_similarity_score": sift_score  # todo: list for more resolutions?
-                # todo: times?
-            }
+                # todo: also some data?
 
-            img_stats_list.append(img_stats)
+                img_stats = {
+                    "id_1": i,
+                    "id_2": j,
+                    "img_1": str(img_1_path),
+                    "img_2": str(img_2_path),
+                    "sift_similarity_score": sift_score,  # todo: list for more resolutions?
+                    "resolution": max_dim_len,
+                }
 
-            if SHOW_IMAGES:
-                viewer.idx1 = i
-                viewer.idx2 = j
-                viewer.show_current(interactive=False)
+                img_stats_list.append(img_stats)
 
+                if SHOW_IMAGES:
+                    viewer.idx1 = i
+                    viewer.idx2 = j
+                    viewer.show_current(interactive=False)
+
+        avg_time_detect = sum(times_detect) / len(times_detect)
+        avg_time_match = sum(times_match) / len(times_match)
+        print("-----------------------------------------")
+        print(f"{max_dim_len}: {avg_time_detect:.4f}, {avg_time_match:.4f}")
+        print("-----------------------------------------")
 
     imgs_stats = {
         "description": "SIFT statistics of image pairs from dataset computed across multiple resolutions",

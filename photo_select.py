@@ -45,6 +45,11 @@ if __name__ == "__main__":
         "results_root": RESULTS_ROOT
     }
 
+
+
+
+
+
     scores = {
         "brisque":  compute_brisque_scores(paths_cfg, img_paths),
         "nima":     compute_nima_scores(paths_cfg, img_paths),

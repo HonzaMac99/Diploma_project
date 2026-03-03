@@ -5,7 +5,13 @@
 =====================================================================
 
 Side quests:
+e) sepsat rozlišení obrázků
 d) napsat README s detailním návodem použití
+
+# Brisque:  256, 512, 1024, 2048, 4096 | longer edge max len, aspect ratio
+# Nima:     224                        | both
+# Sift:     256, 512, 1024, 2048, 4096 | longer edge max len, aspect ratio
+# Efnetv2:  240                        | both
 
 
 Done:
