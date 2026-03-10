@@ -33,7 +33,7 @@ def get_sift_bf():
         _bf = cv2.BFMatcher() # keypoint matcher
     return _sift, _bf
 
-
+# inspired by LB
 def compute_matches(descr_1, descr_2):
     _, bf = get_sift_bf()
     try:
@@ -83,9 +83,14 @@ def compute_sift_similarities(paths_cfg, img_paths):
         sift_scores = np.full((n_images, n_images), -np.inf)
 
         for i, img_path in enumerate(tqdm(img_paths, desc="SIFT feats", unit="img")):
+            # img = img_resize(cv2.imread(str(img_path)), SIFT_RES)
+            img = Image.open(img_path)
+            img = ImageOps.exif_transpose(img)  # apply EXIF orientation
+            img = np.asarray(img)
+            img_tfd = img_resize(img, max_d=SIFT_RES, tf_option=1)
+            img_uint8 = (img_tfd * 255).astype(np.uint8)
 
-            img = img_resize(cv2.imread(str(img_path)), SIFT_RES)
-            keypoints[i], descriptors[i] = sift.detectAndCompute(img, None)
+            keypoints[i], descriptors[i] = sift.detectAndCompute(img_uint8, None)
 
         for i, img_name in enumerate(tqdm(img_paths, desc="SIFT matches", unit="img&nbrs")):
             for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):

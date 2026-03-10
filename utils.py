@@ -20,19 +20,6 @@ import hashlib
 
 # region image handling
 
-# original resize inspired by LB
-def image_resize_old(image, max_d=1024):
-    height, width = image.shape[:2]
-    aspect_ratio = width / height
-    if aspect_ratio < 1:
-        new_height = max_d
-        new_width = int(max_d * aspect_ratio)
-    else:
-        new_height = int(max_d / aspect_ratio)
-        new_width = max_d
-    image = cv2.resize(image, (new_width, new_height)) # cv2.resize takes (w, h) format
-    return image
-
 # reduce the size of the image so that the longer dimension is max_d long
 def img_resize(img, max_d=1024, tf_option=1):
     img_norm = img.astype(np.float32) / 255.0
@@ -190,6 +177,24 @@ def load_results_versioned(paths_cfg, file_name_base, ver_idx=None, load_method=
         return scores
     else:
         raise ValueError(f"Unsupported file type: {load_method}")
+
+
+def remove_all_files_by_name(results_root, file_name_base):
+    root = Path(results_root)
+
+    # Iterate recursively through all files
+    files_to_delete = []
+    print("Files to delete:")
+    for file in root.rglob("*"):
+        if file.is_file() and file.stem == file_name_base:
+            print(f"  {file}")  # optional: show what is being deleted
+            files_to_delete.append(file)
+
+    inp_str = input("Sure you want to delete all files? [y/n]")
+    if inp_str == "y":
+        for file in files_to_delete:
+            file.unlink()
+        print("Files deleted successfully")
 
 
 def save_exif_comment(image_path, quality_score):
@@ -514,4 +519,9 @@ class ImageViewer:
                 self.idx2 = (self.idx2 - 1) % self.n_frames
 
         self.show_current(interactive=True)
+
+# class SelectionViewer(ImageViewer):
+
+# class ClusterViewer(ImageViewer):
+
 # endregion

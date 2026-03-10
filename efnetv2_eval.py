@@ -1,10 +1,8 @@
+import tensorflow as tf
+from scipy.spatial import distance
+from tqdm import tqdm
 import time
 
-from torch.distributed.rpc.api import method_name
-from tqdm import tqdm
-from scipy.spatial import distance
-
-import tensorflow as tf
 from keras import preprocessing
 from keras.applications.efficientnet_v2 import preprocess_input, EfficientNetV2B1
 
@@ -29,92 +27,37 @@ SAVE_STATS = False
 RECOMPUTE = True
 OVERRIDE = True
 
-# inspired by LB
-def compute_contents(img, model):
-    t = preprocessing.image.img_to_array(img)
-    t = np.expand_dims(t, axis=0)
-    t = preprocess_input(t)
-    f = model.predict(t, verbose=0, batch_size=8)
-    f = f.tolist()
-    return f[0]
 
-
-def compute_efnetv2_similarities(paths_cfg, img_paths):
+def compute_efnetv2_similarities(paths_cfg, img_paths, batch_size=32, use_gpu=False):
     save_file_base = "efnetv2_scores"
 
-    # ver_idx = 0
-    efnetv2_scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
-
-    if efnetv2_scores is None or len(efnetv2_scores) != len(img_paths):
-        # todo: resolve tf incompatible gpu drivers
-        # gpus = tf.config.list_physical_devices('GPU')
-        # device_str = '/gpu:0' if gpus else '/cpu:0'
-        device_str = '/cpu:0'
-
-        contents = []
-
-        with tf.device(device_str):
-            # todo: get our own weights
-            # class_model = EfficientNetV2B1(weights="imagenet")
-            model = EfficientNetV2B1(weights=WEIGHTS_PATH)
-
-            for i, img_path in enumerate(tqdm(img_paths, desc="EFNETV2 contents", unit="img")):
-
-                img_tfd = preprocessing.image.load_img(img_path, color_mode='rgb', target_size=(EFNETV2_RES, EFNETV2_RES))
-                img_contents = compute_contents(img_tfd, model)
-
-                contents.append(img_contents)
-
-        n_images = len(img_paths)
-        n_neighbors = N_NEIGHBORS
-        efnetv2_scores = np.full((n_images, n_images), -np.inf)
-
-        for i, img_name in enumerate(tqdm(img_paths, desc="EFNETV2 similarities", unit="img&nbrs")):
-            for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):
-                if i == j:
-                    if j+1 == MAX_IMAGES:
-                        break
-                    else:
-                        continue
-
-                efnetv2_score = (1 - distance.cdist([contents[i]], [contents[j]], 'cosine').item()) * 100 # * 15
-                efnetv2_scores[i, j] = efnetv2_score
-
-        # save scores after computation
-        save_results_versioned(paths_cfg, efnetv2_scores, save_file_base, save_method="npz")
-
-    return efnetv2_scores
-
-
-def compute_efnetv2_similarities_v2(paths_cfg, img_paths, batch_size=32):
-    save_file_base = "efnetv2_scores"
-
+    # # ver_idx = 0
     # efnetv2_scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
     efnetv2_scores = None
 
     if efnetv2_scores is None or len(efnetv2_scores) != len(img_paths):
 
-        # device_str = torch.device("cuda" if torch.cuda.is_available() and cuda else "cpu")
-        device_str = '/cpu:0'
+        # todo: resolve tf incompatible gpu drivers
+        gpus = tf.config.list_physical_devices('GPU')
+        device_str = '/gpu:0' if gpus and use_gpu else '/cpu:0'
 
         contents = []
         batch = []
 
         with tf.device(device_str):
+            # todo: get our own weights
             model = EfficientNetV2B1(weights=WEIGHTS_PATH)
+            # class_model = EfficientNetV2B1(weights="imagenet")
 
             for img_path in tqdm(img_paths, desc="EFNETV2 contents", unit="img"):
 
-                img_tfd = preprocessing.image.load_img(
-                    img_path,
-                    color_mode='rgb',
-                    target_size=(EFNETV2_RES, EFNETV2_RES)
-                )
+                img_tfd = preprocessing.image.load_img(img_path, color_mode='rgb', target_size=(EFNETV2_RES, EFNETV2_RES))
 
                 # convert to array
-                t = preprocessing.image.img_to_array(img_tfd)
-                t = preprocess_input(t)
-                batch.append(t)
+                img_tfd = preprocessing.image.img_to_array(img_tfd)
+                img_tfd = preprocess_input(img_tfd)
+
+                batch.append(img_tfd)
 
                 # When batch is full → predict
                 if len(batch) == batch_size:
@@ -140,25 +83,26 @@ def compute_efnetv2_similarities_v2(paths_cfg, img_paths, batch_size=32):
         for i in tqdm(range(n_images), desc="EFNETV2 similarities", unit="img&nbrs"):
             for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):
                 if i == j:
-                    if j + 1 == MAX_IMAGES:
-                        break
-                    else:
-                        continue
+                    continue
+                cos_dist = distance.cdist([contents[i]], [contents[j]], 'cosine').item()
+                efnetv2_scores[i, j] = (1 - cos_dist) * 100
 
-                efnetv2_score = (
-                    1 - distance.cdist([contents[i]], [contents[j]], 'cosine').item()
-                ) * 100
-
-                efnetv2_scores[i, j] = efnetv2_score
-
+        # save scores after computation
         save_results_versioned(paths_cfg, efnetv2_scores, save_file_base, save_method="npz")
 
     return efnetv2_scores
 
 
-
-
 # region Other experimental functions
+
+# inspired by LB
+def compute_contents(img, model):
+    t = preprocessing.image.img_to_array(img)
+    t = np.expand_dims(t, axis=0)
+    t = preprocess_input(t)
+    f = model.predict(t, verbose=0, batch_size=8)
+    f = f.tolist()
+    return f[0]
 
 # inspired by LB
 def compute_imgs_contents(target_path, recompute=False, target_res=240):
@@ -340,7 +284,7 @@ if __name__ == "__main__":
     batch_sizes = [1, 2, 16, 32, 64]
     for b_size in batch_sizes:
         start_t = time.time()
-        compute_efnetv2_similarities_v2(paths_cfg, img_paths, batch_size=b_size)
+        compute_efnetv2_similarities(paths_cfg, img_paths, batch_size=b_size)
         end_t = time.time()
         time_diff = end_t-start_t
         print(f"B {b_size}: {time_diff:.4f}")
