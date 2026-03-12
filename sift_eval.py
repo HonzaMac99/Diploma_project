@@ -5,14 +5,14 @@ from tqdm import tqdm
 from utils import *
 
 DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/full/"
 RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
-MAX_IMAGES = 5 # [int|None] maximum number of images to process (for debugging)
+MAX_IMAGES = None # [int|None] maximum number of images to process (for debugging)
 N_NEIGHBORS = 20
 N_SIFT_FEATS = 1000
-IMG_NUM_RES = 5  # 4096, 2048, 1024, 512, 256
+IMG_NUM_RES = 1 # 5  # 4096, 2048, 1024, 512, 256
 SIFT_RES = 1024
 
 SHOW_IMAGES = False
@@ -30,30 +30,35 @@ def get_sift_bf():
     if _sift is None:
         _sift = cv2.SIFT_create(nfeatures=N_SIFT_FEATS)  # SIFT algorithm with number of keypoints
     if _bf is None:
-        _bf = cv2.BFMatcher() # keypoint matcher
+        _bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=False) # using default args
     return _sift, _bf
 
 # inspired by LB
 def compute_matches(descr_1, descr_2):
     _, bf = get_sift_bf()
-    try:
-        matches_12 = bf.knnMatch(descr_1, descr_2, k=2) # get cv2.DMatch objs
-        matches_21 = bf.knnMatch(descr_2, descr_1, k=2)
-    except:
-        print("Something bad happened in compute_matches")
+
+    if descr_1 is None or descr_2 is None:
+        print("[compute_matches]: At least one descriptor array is None")
         return []
 
-    dist_ratio_threshold = 0.7
+    if len(descr_1) < 2 or len(descr_2) < 2:
+        print("[compute_matches]: At least one descriptor array has len < 2")
+        return []
+
+    # get cv2.DMatch objs
+    matches_12 = bf.knnMatch(descr_1, descr_2, k=2)
+    matches_21 = bf.knnMatch(descr_2, descr_1, k=2)
+
     matches_12_robust = []
     matches_21_robust = []
 
-    # Filter both directions first
+    # Filter both directions first - Lowe ratio check from SIFT paper
     for m1_first, m1_second in matches_12:
-        if m1_first.distance / m1_second.distance < dist_ratio_threshold:
+        if m1_first.distance < 0.75 * m1_second.distance:
             matches_12_robust.append(m1_first)
 
     for m2_first, m2_second in matches_21:
-        if m2_first.distance / m2_second.distance < dist_ratio_threshold:
+        if m2_first.distance < 0.75 * m2_second.distance:
             matches_21_robust.append(m2_first)
 
     # Symmetry check
@@ -113,12 +118,47 @@ def compute_sift_similarities(paths_cfg, img_paths):
     return sift_scores
 
 # region Other experimental functions
-# inspired by LB
-def compute_score(matches, keypoint1, keypoint2):
-    score = 1000 * (matches / min(keypoint1, keypoint2))
-    if score > 100:
-        score = 100
-    return score
+
+def get_resized_img(img_path, max_dim_len):
+    img = Image.open(img_path)
+    img = ImageOps.exif_transpose(img)  # apply EXIF orientation
+    img = np.asarray(img)
+    img_tfd = img_resize(img, max_d=max_dim_len, tf_option=1)
+    img_tfd = (img_tfd * 255).astype(np.uint8)
+    cv2.cvtColor(img_tfd, cv2.COLOR_RGB2GRAY)
+    return img_tfd
+
+
+def show_matches(i, j, img_paths, keypoints, matches, max_dim_len):
+    img1 = get_resized_img(img_paths[i], max_dim_len)
+    img2 = get_resized_img(img_paths[j], max_dim_len)
+    kp1 = keypoints[i]
+    kp2 = keypoints[j]
+    # img3 = cv2.drawMatchesKnn(img1, kp1, img2, kp2, matches, None,
+    #                           flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+    h1, w1 = img1.shape[:2]
+    h2, w2 = img2.shape[:2]
+    img3 = np.zeros((max(h1, h2), w1 + w2, 3), dtype=np.uint8)
+    img3[:h1, :w1] = img1
+    img3[:h2, w1:w1 + w2] = img2
+
+    for m in matches:
+        m = m[0]
+        pt1 = tuple(map(int, kp1[m.queryIdx].pt))
+        pt2 = tuple(map(int, kp2[m.trainIdx].pt))
+        pt2 = (int(pt2[0] + w1), int(pt2[1]))
+        cv2.line(img3, pt1, pt2, (0, 255, 0), thickness=5)  # <-- thicker line
+
+    plt.figure(figsize=(10, 5))
+    sim_score = compute_sift_score(matches)
+    plt.title(f"Similarity score: {sim_score:.2f}, matches: {len(matches)}")
+    plt.imshow(img3)
+    plt.axis("off")
+    plt.show(block=True)
+
+
+def compute_sift_score(matches):
+    return pow((len(matches) / N_SIFT_FEATS), 1/8)
 
 # inspired by LB
 def compute_similarities(img_paths, n_neighbors):
@@ -133,14 +173,14 @@ def compute_similarities(img_paths, n_neighbors):
     keypoints = {}
     descriptors = {}
     sift_scores = np.ones((n_images, n_images)) * (-1)
-    viewer.scores = sift_scores
+    # viewer.scores = sift_scores
 
-    max_dim_base = 4096 # 512
+    max_dim_base = SIFT_RES
     for k in range(IMG_NUM_RES):
         max_dim_len = max_dim_base // 2**k
         times_detect = []
 
-        for i, img_path in enumerate(img_paths):
+        for i, img_path in enumerate(tqdm(img_paths, desc="SIFT feats", unit="img")):
             start_t = time.time()
             # img = img_resize(cv2.imread(img_path), max_dim_len)
             img = Image.open(img_path)
@@ -154,33 +194,27 @@ def compute_similarities(img_paths, n_neighbors):
             times_detect.append(end_t-start_t)
 
         times_match = []
-        for i, img_1_path in enumerate(img_paths):
+        for i in range(len(img_paths)):
             for j in range(max(0, i - n_neighbors), min(n_images, i + n_neighbors + 1)):
                 if i == j:
                     continue
 
-                matches = []
-                img_2_path = img_paths[j]
-
-                if len(keypoints[i]) == 0 or len(keypoints[j]) == 0:
-                    sift_score = 0
-                else:
-                    start_t = time.time()
-                    matches = compute_matches(descriptors[i], descriptors[j])
-                    sift_score = compute_score(len(matches), len(keypoints[i]), len(keypoints[j]))
-                    end_t = time.time()
-                    times_match.append(end_t-start_t)
+                start_t = time.time()
+                matches = compute_matches(descriptors[i], descriptors[j])
+                sift_score = compute_sift_score(matches)
+                end_t = time.time()
+                times_match.append(end_t-start_t)
 
                 sift_scores[i, j] = sift_score
-                print(f"({i+1}, {j+1}) score: {sift_score}, matches: {len(matches)} / ({len(keypoints[i])}, {len(keypoints[j])})")
+                print(f"({i+1}, {j+1}) score: {sift_score}, matches: {len(matches)} / ({max(len(keypoints[i]), len(keypoints[j]))}")
 
                 # todo: also some data?
 
                 img_stats = {
                     "id_1": i,
                     "id_2": j,
-                    "img_1": str(img_1_path),
-                    "img_2": str(img_2_path),
+                    "img_1": str(img_paths[i]),
+                    "img_2": str(img_paths[j]),
                     "sift_similarity_score": sift_score,  # todo: list for more resolutions?
                     "resolution": max_dim_len,
                 }
@@ -191,6 +225,10 @@ def compute_similarities(img_paths, n_neighbors):
                     viewer.idx1 = i
                     viewer.idx2 = j
                     viewer.show_current(interactive=False)
+
+                thr = 0.7
+                if sift_score > thr:
+                    show_matches(i, j, img_paths, keypoints, matches, max_dim_len)
 
         avg_time_detect = sum(times_detect) / len(times_detect)
         avg_time_match = sum(times_match) / len(times_match)
@@ -269,7 +307,7 @@ if __name__ == "__main__":
     }
 
     scores = []
-    viewer = ImageViewer(img_paths, scores, mode='dual', tool_name=method_name)
+    # viewer = ImageViewer(img_paths, scores, mode='dual', tool_name=method_name)
 
     method_stats = {}
     file_name_base = "sift_stats_experimental"
@@ -280,7 +318,7 @@ if __name__ == "__main__":
 
     if method_stats:
         print_scores(method_stats)
-        viewer.scores = get_scores_json(method_stats)
+        # viewer.scores = get_scores_json(method_stats)
     else:
         method_stats = compute_similarities(img_paths, N_NEIGHBORS)
         if SAVE_STATS:
@@ -288,6 +326,6 @@ if __name__ == "__main__":
                                                override_last=OVERRIDE)
             print(f"Saved new data as: {save_path}")
 
-    plt.ioff()
-    viewer.fig.canvas.mpl_connect('key_press_event', lambda event: viewer.on_key(event))
-    viewer.show_current(interactive=False)
+    # plt.ioff()
+    # viewer.fig.canvas.mpl_connect('key_press_event', lambda event: viewer.on_key(event))
+    # viewer.show_current(interactive=False)

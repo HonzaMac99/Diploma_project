@@ -9,8 +9,9 @@ from pathlib import Path
 from datetime import datetime
 from tqdm import tqdm
 from collections import defaultdict
+import json
 
-from utils import save_results_versioned, load_results_versioned, remove_all_files_by_name
+from utils import save_results_versioned, load_results_versioned, remove_all_files_by_name, img_resize
 from sift_eval import compute_sift_similarities
 from clip_eval import compute_clip_similarities
 
@@ -24,16 +25,18 @@ RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
 MAX_IMAGES = None
+N_SIFT_FEATS = 1000
+SIFT_RES = 1024
 
 CLUSTER_DIFF_THR = 10.0    # [s]
 CLUSTER_MAX_MULT = 2  # Include a new photo in the cluster if its time difference
                        # is max x times bigger than the biggest in the cluster
 NEIGHBORS_RANGE = 15  # range of the scope for similar photos search, ex. range = 10 -> 19 neighbors
 THR_HIST = 0.75
-THR_SIFT = 0.8
+THR_SIFT = 0.7
 THR_CLIP = 0.85
 
-SHOW_CLUSTERS = True
+SHOW_CLUSTERS = False
 
 class UnionFind:
     def __init__(self, n):
@@ -233,7 +236,7 @@ def create_time_clusters(img_paths, thr=10.0, max_mult=2.0):
     # get sorted img paths as well - for img displaying
     # img_paths = [x[0] for x in photo_times]
 
-    clusters = []
+    clusters_list = []
     last_time = photo_times[0][1]
     new_cluster = [0]
     max_cluster_diff = thr
@@ -249,13 +252,18 @@ def create_time_clusters(img_paths, thr=10.0, max_mult=2.0):
         elif diff > outlier_diff_thr:
             if len(new_cluster) > 1:
                 print(new_cluster)
-                clusters.append(new_cluster)
+                clusters_list.append(new_cluster)
             new_cluster = [i]
             max_cluster_diff = thr
 
         last_time = time
 
-    return clusters
+    if SHOW_CLUSTERS:
+        for cluster in clusters_list:
+            print(cluster)
+            show_cluster(cluster, img_paths)
+
+    return clusters_list
 # endregion
 
 # region histogram clusters
@@ -353,8 +361,95 @@ def create_hist_clusters(img_paths, thr=0.8):
 
 # region sift clusters
 
-def create_sift_clusters(img_paths, thr=0.8):
-    ...
+# inspired by LB
+def compute_matches(descr_1, descr_2):
+    bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)
+
+    if descr_1 is None or descr_2 is None:
+        print("[compute_matches]: At least one descriptor array is None")
+        return []
+
+    if len(descr_1) < 2 or len(descr_2) < 2:
+        print("[compute_matches]: At least one descriptor array has len < 2")
+        return []
+
+    # get cv2.DMatch objs
+    matches_12 = bf.knnMatch(descr_1, descr_2, k=2)
+    matches_21 = bf.knnMatch(descr_2, descr_1, k=2)
+
+    matches_12_robust = []
+    matches_21_robust = []
+
+    # Filter both directions first - Lowe ratio check from SIFT paper
+    for m1_first, m1_second in matches_12:
+        if m1_first.distance < 0.75 * m1_second.distance:
+            matches_12_robust.append(m1_first)
+
+    for m2_first, m2_second in matches_21:
+        if m2_first.distance < 0.75 * m2_second.distance:
+            matches_21_robust.append(m2_first)
+
+    # Symmetry check
+    matches_robust = []
+    for m1 in matches_12_robust:
+        for m2 in matches_21_robust:
+            if m1.queryIdx == m2.trainIdx and m2.queryIdx == m1.trainIdx:
+                matches_robust.append([m1])  # wrap if needed
+
+    return matches_robust
+
+
+def create_sift_clusters(img_paths, thr=0.7):
+    sift = cv2.SIFT_create(nfeatures=N_SIFT_FEATS)  # SIFT algorithm with number of keypoints
+    n_images = len(img_paths)
+    nb_range = NEIGHBORS_RANGE
+
+    keypoints = {}
+    descriptors = {}
+    simil_mtx = np.zeros((n_images, n_images))
+    np.fill_diagonal(simil_mtx, 1.0)
+    for i, img_path in enumerate(tqdm(img_paths, desc="SIFT features", unit="img")):
+        # img = img_resize(cv2.imread(str(img_path)), SIFT_RES)
+        img = Image.open(img_path)
+        img = ImageOps.exif_transpose(img)  # apply EXIF orientation
+        img = np.asarray(img)
+        img_tfd = img_resize(img, max_d=SIFT_RES, tf_option=1)
+        img_uint8 = (img_tfd * 255).astype(np.uint8)
+
+        keypoints[i], descriptors[i] = sift.detectAndCompute(img_uint8, None)
+
+    uf = UnionFind(n_images)
+    for i in tqdm(range(n_images), desc="SIFT matches", unit="img&nbrs"):
+        for j in range(max(0, i - nb_range), min(n_images, i + nb_range + 1)):
+            if i == j:
+                continue
+
+            sift_simil = simil_mtx[i, j]
+            if sift_simil == 0:
+                matches = compute_matches(descriptors[i], descriptors[j])
+                sift_simil = pow((len(matches) / N_SIFT_FEATS), 1/8)
+                simil_mtx[i, j] = sift_simil
+                simil_mtx[j, i] = sift_simil  # spare future calculations
+
+            if sift_simil > thr:
+                i_cluster = uf.get_cluster(i)
+                # check the similarity with every element of the cluster that is being extended
+                if len(i_cluster) == 1 or is_cluster_similar(j, i_cluster, simil_mtx, thr):
+                    uf.union(i, j)
+            # print(f"Similarity of {i}-{j} pair is {sift_simil}")
+
+    clusters = defaultdict(list)
+    for i in range(n_images):
+        root = uf.find(i)
+        clusters[root].append(i)
+
+    clusters_list = [cluster for cluster in list(clusters.values()) if len(cluster) > 1]
+    if SHOW_CLUSTERS:
+        for cluster in clusters_list:
+            print(cluster)
+            show_cluster(cluster, img_paths)
+    # print(clusters_list)
+    return clusters_list
 # endregion
 
 # region clip clusters
@@ -392,6 +487,7 @@ def create_clip_clusters(img_paths, thr=0.8, batch_size=32, cuda=True):
 
     nb_range = NEIGHBORS_RANGE
     n_images = len(img_paths)
+    # creating matrix with size in the order of MB
     if n_images <= 1000:
         simil_mtx = contents @ contents.T
     else:
@@ -408,6 +504,7 @@ def create_clip_clusters(img_paths, thr=0.8, batch_size=32, cuda=True):
             if clip_simil == 0:
                 clip_simil = contents[i] @ contents[j]
                 simil_mtx[i, j] = clip_simil
+                simil_mtx[j, i] = clip_simil  # spare future calculations
 
             if clip_simil > thr:
                 i_cluster = uf.get_cluster(i)
@@ -454,26 +551,75 @@ if __name__ == "__main__":
     }
 
     # img_clusters = create_man_clusters(img_paths, thr=CLUSTER_DIFF_THR, max_mult=CLUSTER_MAX_MULT)
-    # img_clusters = create_hist_clusters(img_paths, thr=THR_HIST)
-    # img_clusters = create_sift_clusters(img_paths, thr=THR_SIFT)
-    img_clusters = create_clip_clusters(img_paths, thr=THR_CLIP)
-    data = {
-        "clusters": [str(cluster) for cluster in img_clusters]  # for better json formatting
-    }
-    save_results_versioned(paths_cfg, data, "clusters_hists", save_method="json")
+    # data = {
+    #     "clusters":     [str(cluster) for cluster in img_clusters],  # for better json formatting
+    #     "image_refs":   [f"{img_path.name}, {i}" for i, img_path in enumerate(img_paths)]
+    # }
+    # save_results_versioned(paths_cfg, data, "clusters_manual", save_method="json")
 
-    print("Saved clusters")
-    for cluster in img_clusters:
-        print(cluster)
+    img_clusters = {
+        "clusters_time": create_time_clusters(img_paths, thr=CLUSTER_DIFF_THR, max_mult=CLUSTER_MAX_MULT),
+        "clusters_hists": create_hist_clusters(img_paths, thr=THR_HIST),
+        "clusters_sift": create_sift_clusters(img_paths, thr=THR_SIFT),
+        "clusters_clip": create_clip_clusters(img_paths, thr=THR_CLIP)
+    }
+    method_names = img_clusters.keys()
+
+    for method_name in method_names:
+        data = {
+            "clusters":     [str(cluster) for cluster in img_clusters[method_name]],  # str for better json formatting
+            "image_refs":   [f"{img_path.name}, {i}" for i, img_path in enumerate(img_paths)]
+        }
+        save_results_versioned(paths_cfg, data, method_name, save_method="json")
 
     # # additional cluster checking
     # cluster_to_see = [2688]
     # show_cluster(cluster_to_see, img_paths)
 
-    # # load the cluster data
-    # data_r = load_results_versioned(paths_cfg, "clusters_manual", load_method="json")
-    # img_clusters = [json.loads(cluster) for cluster in data_r["clusters"]]
-    # print(img_clusters)
+    # load the cluster data
+    data_r = load_results_versioned(paths_cfg, "clusters_manual", load_method="json")
+    man_clusters = [json.loads(cluster) for cluster in data_r["clusters"]]
+    if "image_refs" in data_r:
+        img_paths_pairs = []
+        for pair_str in data_r["image_refs"]:
+            name, idx = pair_str.split(",")
+            img_paths_pairs.append((name.strip(), int(idx)))
+        img_paths = [dataset_path / p for p, _ in sorted(img_paths_pairs, key=lambda x: x[1])]
+
+    list_of_img_clusters = []
+    method_names = ["clusters_time", "clusters_hists", "clusters_sift", "clusters_clip"]
+    for method_name in method_names:
+        data_r = load_results_versioned(paths_cfg, method_name, load_method="json")
+        method_clusters = [json.loads(cluster) for cluster in data_r["clusters"]]
+        list_of_img_clusters.append(method_clusters)
+
+    method_tps = [0] * len(list_of_img_clusters)
+    total_pairs = 0
+    nb_range = NEIGHBORS_RANGE
+    for i in tqdm(range(n_images), desc="SIFT matches", unit="img&nbrs"):
+        for j in range(max(0, i - nb_range), min(n_images, i + nb_range + 1)):
+            if j >= i:
+                continue
+
+            same_man_cluster = False
+            for cluster in man_clusters:
+                if i in cluster and j in cluster:
+                    same_man_cluster = True
+                    break
+
+            for k, method_clusters in enumerate(list_of_img_clusters):
+                same_cluster = False
+                for cluster in method_clusters:
+                    if i in cluster and j in cluster:
+                        same_cluster = True
+                        break
+                if same_man_cluster == same_cluster:
+                    method_tps[k] += 1
+            total_pairs += 1
+
+    for i, method_name in enumerate(method_names):
+        print(f"{method_name}: {method_tps[i]} / {total_pairs}")
+
 
     # # remove all files with clusters
     # remove_all_files_by_name(paths_cfg["results_root"], "clusters_manual")
