@@ -231,7 +231,10 @@ def create_time_clusters(img_paths, thr=10.0, max_mult=2.0):
         time_data = get_time(img_path)
         photo_times.append((img_path, time_data))
 
+    original = photo_times.copy()
     photo_times.sort(key=lambda x: x[1])
+    if photo_times != original:
+        print("W: Photo times do not match the file names!")
 
     # get sorted img paths as well - for img displaying
     # img_paths = [x[0] for x in photo_times]
@@ -576,7 +579,7 @@ if __name__ == "__main__":
     # cluster_to_see = [2688]
     # show_cluster(cluster_to_see, img_paths)
 
-    # load the cluster data
+    # load the cluster data for comparison
     data_r = load_results_versioned(paths_cfg, "clusters_manual", load_method="json")
     man_clusters = [json.loads(cluster) for cluster in data_r["clusters"]]
     if "image_refs" in data_r:
@@ -593,6 +596,7 @@ if __name__ == "__main__":
         method_clusters = [json.loads(cluster) for cluster in data_r["clusters"]]
         list_of_img_clusters.append(method_clusters)
 
+    # compare the clusters from each method with manual
     method_tps = [0] * len(list_of_img_clusters)
     total_pairs = 0
     nb_range = NEIGHBORS_RANGE
