@@ -27,8 +27,8 @@ from utils import save_results_versioned, load_results_versioned, remove_all_fil
 
 DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
 # DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
-# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/full/"
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/grenoble/full/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/full/"
+# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/grenoble/full/"
 # DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/namibie/namibie_corrected/"
 
 RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
@@ -44,8 +44,8 @@ CLUSTER_MAX_MULT = 2  # Include a new photo in the cluster if its time differenc
                        # is max x times bigger than the biggest in the cluster
 NEIGHBORS_RANGE = 15  # range of the scope for similar photos search, ex. range = 10 -> 19 neighbors
 
-# todo: v3? Time aid doesn't cover all potential clusters to be seen, do we need to go through all photos,
-#       instead of displaying just the photos around the time cluster??
+# v3: Gap-browsing pass added — photos not visible in any time-based cluster window
+#     are now paged through before the time-candidate pass, so no photo is skipped.
 
 class UnionFind:
     def __init__(self, n):
@@ -149,14 +149,14 @@ def show_cluster(cluster, clusters, img_paths):
 
     offset = img_grid_w
     start_idx = min(cluster) - offset
-    start_idx = max(min(start_idx, n_images-1-img_grid_n), 0)
+    start_idx = max(min(start_idx, n_images-img_grid_n), 0)
 
     for txt in plot_texts:
         txt.remove()
 
     # creating an array JUST for the current plot scope with frame colors
     frame_colors = ['limegreen' if i in cluster else 'none' for i in range(start_idx, start_idx + img_grid_n)]
-    frame_colors[min(cluster)-start_idx] = 'lime'
+    frame_colors[min(cluster) - start_idx] = 'lime' if len(cluster) > 1 else 'red'
 
     # display other clusters in red
     for check_cluster in clusters:
@@ -247,13 +247,14 @@ def clusters_editor(new_cluster, clusters, image_paths):
         new_cluster = last_cluster + new_cluster
         clusters_editor(new_cluster, clusters, image_paths)
     elif action == "select":
-        new_cluster = [start_idx + i for i in data]
+        new_cluster = sorted([start_idx + i for i in data])
         clusters.append(new_cluster)
         print(f"Keeping: {new_cluster}")
     elif action == "split":
         new_clusters = []
         for group in data:
-            new_clusters.append([start_idx + i  for i in group])
+            new_cluster = sorted([start_idx + i  for i in group])
+            new_clusters.append(new_cluster)
         clusters.extend(new_clusters)
         print(f"Keeping: {new_clusters}")
 
@@ -264,6 +265,16 @@ def is_new_cl(new_cluster, clusters):
             if img_id in new_cluster:
                 return False
     return True
+
+
+# Returns the set of photo indices that would be visible in show_cluster's grid
+# when it is called for the given cluster.
+def get_cluster_window_indices(cluster, n_images):
+    img_grid_n = DISPLAY_GRID_HEIGHT * DISPLAY_GRID_WIDTH
+    offset = DISPLAY_GRID_WIDTH
+    start_idx = min(cluster) - offset
+    start_idx = max(min(start_idx, n_images - 1 - img_grid_n), 0)
+    return set(range(start_idx, min(start_idx + img_grid_n, n_images)))
 
 
 # create clusters manually aided by the time-wise cluster suggestions
@@ -292,14 +303,18 @@ def create_man_clusters(img_paths, thr=10.0, max_mult=2.0):
 
     # get sorted img paths as well
     img_paths = [x[0] for x in photo_times]
+    n_images = len(img_paths)
+    img_grid_n = DISPLAY_GRID_HEIGHT * DISPLAY_GRID_WIDTH
 
-    clusters = []
+    # --- Pass 1: collect time-based candidate clusters (no editor yet) ---
+    time_candidates = []        # list of candidate cluster lists
+    covered_indices = set()     # photo indices visible in at least one candidate's window
+
     last_time = photo_times[0][1]
     new_cluster = [0]
     max_cluster_diff = thr
     for i, (img_path, time) in enumerate(photo_times[1:], start=1):
         diff = (time - last_time).total_seconds()
-        # print(f"img{i-1} - img{i} diff: {diff}")
 
         outlier_diff_thr = max_cluster_diff * max_mult
         if diff < outlier_diff_thr:
@@ -307,13 +322,51 @@ def create_man_clusters(img_paths, thr=10.0, max_mult=2.0):
             if diff > max_cluster_diff:
                 max_cluster_diff = diff
         elif diff > outlier_diff_thr:
-            if len(new_cluster) > 1 and is_new_cl(new_cluster, clusters):
-                print(f"New_cluster: {new_cluster}")
-                clusters_editor(new_cluster, clusters, img_paths)
+            if len(new_cluster) > 1:
+                time_candidates.append(new_cluster)
+                covered_indices.update(get_cluster_window_indices(new_cluster, n_images))
             new_cluster = [i]
             max_cluster_diff = thr
 
         last_time = time
+
+    # Don't forget the last running cluster if it was a valid candidate
+    if len(new_cluster) > 1:
+        time_candidates.append(new_cluster)
+        covered_indices.update(get_cluster_window_indices(new_cluster, n_images))
+
+    # --- Pass 2: browse uncovered gaps ---
+    # Find contiguous runs of indices not visible in any time-candidate window
+    uncovered = sorted(set(range(n_images)) - covered_indices)
+    if uncovered:
+        print(f"\n>>> {len(uncovered)} photos are not covered by any time-based cluster window.")
+        print("    Paging through them now so you can annotate any missed clusters.")
+        print("    (Press Enter with no text to skip a page)\n")
+
+    clusters = []
+    i = 0
+    while i < len(uncovered):
+        # Build a page of up to img_grid_n consecutive uncovered indices
+        page = [uncovered[i]]
+        i += 1
+        while i < len(uncovered) and uncovered[i] == page[-1] + 1 and len(page) < img_grid_n:
+            page.append(uncovered[i])
+            i += 1
+
+        # Use the first index of the page as a single-element "anchor" so that
+        # show_cluster centres the grid on it; the user selects what they want.
+        anchor_cluster = [page[0]]
+        print(f"Gap page: indices {page[0]} - {page[-1]}")
+        clusters_editor(anchor_cluster, clusters, img_paths)
+
+    # --- Pass 3: run the editor on time-based candidates ---
+    if time_candidates:
+        print(f"\n>>> Now reviewing {len(time_candidates)} time-based cluster suggestion(s).\n")
+    for candidate in time_candidates:
+        if is_new_cl(candidate, clusters):
+            print(f"New_cluster: {candidate}")
+            clusters_editor(candidate, clusters, img_paths)
+
     return clusters
 # endregion
 

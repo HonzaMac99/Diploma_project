@@ -19,7 +19,7 @@ MAX_IMAGES = None # maximum number of images to process
 # NIMA has fixed input img size: orig_res = [3000, 4000] --> [224, 224]
 # turn of batch processing by setting batch_size = 1
 
-SHOW_IMAGES = False
+SHOW_IMAGES = True
 SAVE_SCORE_EXIF = False
 
 SAVE_STATS = False
@@ -301,34 +301,34 @@ if __name__ == "__main__":
     }
 
     # measuring times for batching influence on speed
-    batch_sizes = [1, 2, 16, 32, 64]
+    batch_sizes = [2] # [1, 2, 16, 32, 64]
     for b_size in batch_sizes:
         start_t = time.time()
-        compute_nima_scores(paths_cfg, img_paths, batch_size=b_size, cuda=True)
+        scores = compute_nima_scores(paths_cfg, img_paths, batch_size=b_size, cuda=True)
         end_t = time.time()
         time_diff = end_t-start_t
         print(f"B {b_size}: {time_diff:.4f}")
-    exit()
 
-    scores = []
     viewer = ImageViewer(img_paths, scores, mode='single', tool_name=method_name)
+    print(scores)
+    print(f"<{min(scores)}, {max(scores)}>")
 
-    method_stats = {}
-    file_name_base = "nima_stats_experimental"
-    ver_idx = None
+    # method_stats = {}
+    # file_name_base = "nima_stats_experimental"
+    # ver_idx = None
 
-    if not RECOMPUTE:
-        method_stats = load_results_versioned(paths_cfg, file_name_base, ver_idx=ver_idx, load_method="json")
+    # if not RECOMPUTE:
+    #     method_stats = load_results_versioned(paths_cfg, file_name_base, ver_idx=ver_idx, load_method="json")
 
-    if method_stats:
-        print_scores(method_stats)
-        viewer.scores = get_scores_json(method_stats)
-    else:
-        method_stats = compute_scores(img_paths)
-        if SAVE_STATS:
-            save_path = save_results_versioned(paths_cfg, method_stats, file_name_base, save_method="json",
-                                               override_last=OVERRIDE)
-            print(f"Saved new data as: {save_path}")
+    # if method_stats:
+    #     print_scores(method_stats)
+    #     viewer.scores = get_scores_json(method_stats)
+    # else:
+    #     method_stats = compute_scores(img_paths)
+    #     if SAVE_STATS:
+    #         save_path = save_results_versioned(paths_cfg, method_stats, file_name_base, save_method="json",
+    #                                            override_last=OVERRIDE)
+    #         print(f"Saved new data as: {save_path}")
 
     plt.ioff()
     viewer.fig.canvas.mpl_connect('key_press_event', lambda event: viewer.on_key(event))

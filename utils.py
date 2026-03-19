@@ -332,22 +332,19 @@ class ImageViewer:
         else:
             score = "---"
 
-        exif_text = "EXIF: " + load_exif_comment(img_path)
-
         self.ax.clear()
         self.ax.imshow(img)
         self.ax.axis("off")
         self.ax.set_title(f"{self.tool_name} score: {score}   [{self.idx1+1}/{self.n_frames}]")
 
         # Text under the image
+        x_pos, y_pos = 0.5, -0.02
+        # img_text = "EXIF: " + load_exif_comment(img_path)
+        img_text = img_path.name
         self.ax.text(
-            0.5, -0.02,
-            exif_text,
-            transform=self.ax.transAxes,
-            ha="center",
-            va="top",
-            fontsize=12,
-            wrap=True
+            x_pos, y_pos,
+            img_text,
+            transform=self.ax.transAxes, ha="center", va="top", fontsize=12, wrap=True
         )
 
         if interactive:
