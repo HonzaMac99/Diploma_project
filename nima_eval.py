@@ -88,12 +88,13 @@ def process_nima_batch(batch, model, device, indices):
     return batch_scores.cpu().tolist()
 
 
-def compute_nima_scores(paths_cfg, img_paths, batch_size = 32, cuda=True):
+def compute_nima_scores(paths_cfg, img_paths, batch_size = 32, cuda=True, save_scores=True, load_scores=True):
     save_file_base = "nima_scores"
 
     # ver_idx = 0
-    # scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
     scores = None
+    if load_scores:
+        scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
 
     if scores is None or len(scores) != len(img_paths):
         nima_model = get_nima_model()
@@ -114,7 +115,7 @@ def compute_nima_scores(paths_cfg, img_paths, batch_size = 32, cuda=True):
 
         for img_path in tqdm(img_paths, desc="NIMA", unit="img"):
 
-            img = Image.open(img_path)
+            img = Image.open(img_path).convert("RGB")
             img = ImageOps.exif_transpose(img)  # apply EXIF orientation
 
             img = nima_img_transform(img)  # transform for Nima
@@ -132,7 +133,8 @@ def compute_nima_scores(paths_cfg, img_paths, batch_size = 32, cuda=True):
             scores.extend(batch_scores)
 
         # save scores after computation
-        save_results_versioned(paths_cfg, scores, save_file_base, save_method="npz")
+        if save_scores:
+            save_results_versioned(paths_cfg, scores, save_file_base, save_method="npz")
 
     return scores
 

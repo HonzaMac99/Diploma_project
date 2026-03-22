@@ -9,25 +9,26 @@ import re
 import csv
 from collections import defaultdict
 from scipy.io import loadmat
-
-from networkx.algorithms.tournament import score_sequence
+import shutil
 
 from utils import ImageViewer, load_results_versioned
+from nima_eval import compute_nima_scores
+from clip_iqa_eval import compute_clip_scores
 
 DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/ava/"
-# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/LIVEwild/Images/trainingImages/"
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/full/"
-
-RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/datasets/score_files/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
+RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 
 MAX_IMAGES = None
 
-# SHOW_IMAGES = False
-# SAVE_SCORES = True
+SHOW_IMAGES = False
+SAVE_IMAGES = False
+
+COMPUTE_F1 = True
 RECOMPUTE = True
+
 # OVERRIDE = True
+
 
 # -----------------
 # download links:
@@ -38,11 +39,15 @@ RECOMPUTE = True
 # grenoble      --private collection--
 # kaohsiung     --private collection--
 # koniq10k      https://database.mmsp-kn.de/koniq-10k-database.html
-# LIVE-itw      https://live.ece.utexas.edu/research/ChallengeDB/index.html
+# live-itw      https://live.ece.utexas.edu/research/ChallengeDB/index.html
 # namibie       --private collection--
-# para          https://web.xidian.edu.cn/ldli/en/dataset.html (you need to get password)
-# tad66k        https://www.kaggle.com/datasets/kebeling/tad66k
+# para          https://web.xidian.edu.cn/ldli/en/dataset.html (you need to get password from Yuzhe Yang)
+# real-cur      -- download with flickr-aes --
+# spaq (!)      https://github.com/h4nwei/SPAQ?tab=readme-ov-file
+# tad66k        https://github.com/woshidandan/TANet-image-aesthetics-and-quality-assessment?tab=readme-ov-file 
 # (tid2013)     https://www.kaggle.com/datasets/maindolaamit/tid2013
+
+# todo: try to get SPAQ from Baidu (google drive is unavailable) -> Baidu requires chinese phone number for registration
 
 # ----------
 # notes:
@@ -54,8 +59,9 @@ RECOMPUTE = True
 #            the images don't have rotation exif correction, doesn't really resemble MY ratings
 # [para] enables to choose between aesthetic image score and global image score probably including other qualities
 #   such as light, dof, color, composition
-# [tid2013] is for techincal quality assessment
+# [tid2013] is designed for techincal quality assessment
 # [live-itw, para] best represents MY personal ratings
+#                  "in the wild" means that it uses authentic, natural distortions rather than synthetic ones
 # [tad66k] human perception: image --> theme --> aesthetics vs machine: image --> aesthetics
 
 # line ~200: ':=' is a walrus - it assigns a value and checks at the same time
@@ -69,7 +75,7 @@ dataset_img_dirs = {
     "kaohsiung"     : "full/",
     "koniq10k"      : "1024x768/",
     "live-itw"      : "Images/",
-    "namibie"       : "namibie_corrected/",
+    "namibie"       : "corrected/",
     "para"          : "imgs/",
     "real-cur"      : "",
     "tad66k"        : "TAD66K/",
@@ -270,10 +276,12 @@ def get_flickr_aes_scores(input_path, output_path=Path("flickr_aes_iqa_scores.cs
 
 @score_loader("grenoble")
 def get_grenoble_scores(input_path, output_path=Path("grenoble_iqa_scores.csv")):
+    # Todo
     ...
 
 @score_loader("kaohsiung")
 def get_kaohsiung_scores(input_path, output_path=Path("kaohsiung_iqa_scores.csv")):
+    # Todo
     ...
 
 @score_loader("koniq10k")
@@ -317,6 +325,7 @@ def get_live_itw_scores(input_path, output_path=Path("live_itw_iqa_scores.csv"))
 
 @score_loader("namibie")
 def get_namibie_scores(input_path, output_path=Path("namibie_iqa_scores.csv")):
+    # Todo
     ...
 
 @score_loader("para")
@@ -438,10 +447,26 @@ def get_dataset_scores(dataset_path, dataset_name, img_paths, **kwargs):
     return scores, img_paths
 
 
+def calc_f1(predicted_ids, ground_truth_ids):
+    predicted_set = set(predicted_ids)
+    ground_truth_set = set(ground_truth_ids)
+
+    tp = len(predicted_set & ground_truth_set)  # in both
+    fp = len(predicted_set - ground_truth_set)  # predicted but not in GT
+    fn = len(ground_truth_set - predicted_set)  # in GT but not predicted
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+
+    return {"f1": f1, "precision": precision, "recall": recall, "tp": tp, "fp": fp, "fn": fn}
+
+
 if __name__ == "__main__":
 
-    # dataset_names = ["aadb", "ava", "flickr-aes", "grenoble", "kaohsiung", "koniq10k", "live-itw", "namibie", "tad66k", "tid2013"]
-    dataset_names = ["real-cur"]
+    # dataset_names = ["aadb", "ava", "flickr-aes", "grenoble", "kaohsiung", "koniq10k", "live-itw", "namibie", "para", "real-cur", "tad66k", "tid2013"]
+    dataset_names = ["aadb", "ava", "flickr-aes", "koniq10k", "live-itw", "para", "real-cur", "tad66k", "tid2013"]
+    # dataset_names = ["real-cur", "para"]
 
     for dataset_name in dataset_names:
         print("----------------------")
@@ -457,19 +482,85 @@ if __name__ == "__main__":
 
         # sort the images according to their iqa scores
         sorted_pairs = sorted(zip(img_paths, scores), key=lambda x: x[1], reverse=True)
-        img_paths, scores = map(list, zip(*sorted_pairs))
+        sorted_img_paths, scores = map(list, zip(*sorted_pairs))
 
-        paths_cfg = {
-            "dataset_root": DATASET_ROOT,
-            "dataset_path": img_paths,
-            "results_root": RESULTS_ROOT
-        }
-        assert len(img_paths) == len(scores), "Number of images is different than number of scores!"
-        viewer = ImageViewer(img_paths, scores=scores, mode='single', tool_name=dataset_name)
+        # get the last index of an image with a ground truth score (the rest have assigned values -1)
+        last_score_idx = len(sorted_img_paths) - 1
+        while scores[last_score_idx] == -1:
+            last_score_idx -= 1
 
-        plt.ioff()
-        viewer.fig.canvas.mpl_connect('key_press_event', lambda event: viewer.on_key(event))
-        viewer.show_current(interactive=False)
+        # select 3*4=12 photos from each dataset representing good, medium and bad scores
+        if SHOW_IMAGES:
+            mid_score_idx = last_score_idx // 2
+
+            show_img_paths = sorted_img_paths[:4] + sorted_img_paths[mid_score_idx-2 : mid_score_idx+2] + sorted_img_paths[last_score_idx-4:last_score_idx]
+            show_scores = scores[:4] + scores[mid_score_idx-2 : mid_score_idx+2] + scores[last_score_idx-4:last_score_idx]
+
+            assert len(show_img_paths) == len(show_scores), "Number of images is different than number of scores!"
+            viewer = ImageViewer(show_img_paths, scores=show_scores, mode='single', tool_name=dataset_name)
+
+            plt.ioff()
+            viewer.fig.canvas.mpl_connect('key_press_event', lambda event: viewer.on_key(event))
+            viewer.show_current(interactive=False)
+
+            dst_root = Path("/home/honzamac/Pictures/")
+            lvls = ["top", "mid", "last"]
+            for i, lvl in enumerate(lvls):
+                for j in range(4):
+                    idx = i*4 + j
+                    img_path = show_img_paths[idx]
+                    img_score = show_scores[idx]
+                    print(f"{dataset_name}-{lvl}-{j+1}: {img_score} ({img_path.name})")
+
+                    if SAVE_IMAGES:
+                        if img_path.suffix == ".bmp":
+                            save_name = f"{dataset_name}_{lvl}_{j + 1}.jpg"
+                            dst_path = dst_root / save_name
+                            img = Image.open(img_path).convert("RGB")  # ensures no alpha channel issues
+                            img.save(dst_path, "JPEG", quality=90)  # quality: 1–95, default is 75
+                            print(f"Saved {dst_path}")
+                        else:
+                            save_name = f"{dataset_name}_{lvl}_{j+1}{img_path.suffix}"
+                            dst_path = dst_root / save_name
+                            shutil.copy(img_path, dst_path)
+                            print(f"Saved {dst_path}")
+
+        # compare NIMA, CLIP and ... score based ranking with GT on 50%, 20%, 10%, 5%, 2%, 1% top selections - use F1 score
+        if COMPUTE_F1:
+            paths_cfg = {
+                "dataset_root": DATASET_ROOT,
+                "dataset_path": dataset_path,
+                "results_root": RESULTS_ROOT
+            }
+
+            # we don't want to evaluate images with no ground truth scores
+            sorted_img_paths = sorted_img_paths[:last_score_idx]
+            scores = scores[:last_score_idx]
+
+            nima_scores = compute_nima_scores(paths_cfg, sorted_img_paths, save_scores=True, load_scores=True)
+            sorted_pairs = sorted(zip(sorted_img_paths, nima_scores), key=lambda x: x[1], reverse=True)
+            nima_img_paths, scores = map(list, zip(*sorted_pairs))
+
+            clip_scores = compute_clip_scores(paths_cfg, sorted_img_paths, save_scores=True, load_scores=True)
+            sorted_pairs = sorted(zip(sorted_img_paths, clip_scores), key=lambda x: x[1], reverse=True)
+            clip_iqa_img_paths, scores = map(list, zip(*sorted_pairs))
+
+            top_splits = [2, 5, 10, 20, 50, 100]
+            for top_split in top_splits:
+                top_k = last_score_idx/top_split
+
+                nima_f1 = calc_f1(nima_img_paths[:top_k], sorted_img_paths[:top_k])
+                clip_iqa_f1 = calc_f1(clip_iqa_img_paths[:top_k], sorted_img_paths[:top_k])
+
+                print(f"NIMA F1 for {100/top_split}% is {nima_f1}")
+                print(f"CLIP-IQA F1 for {100/top_split}% is {clip_iqa_f1}")
+
+        # assert len(sorted_img_paths) == len(scores), "Number of images is different than number of scores!"
+        # viewer = ImageViewer(sorted_img_paths, scores=scores, mode='single', tool_name=dataset_name)
+
+        # plt.ioff()
+        # viewer.fig.canvas.mpl_connect('key_press_event', lambda event: viewer.on_key(event))
+        # viewer.show_current(interactive=False)
 
 
 

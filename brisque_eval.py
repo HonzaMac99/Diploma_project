@@ -36,11 +36,13 @@ def get_brisque():
     return _brisque_obj
 
 
-def compute_brisque_scores(paths_cfg, img_paths):
+def compute_brisque_scores(paths_cfg, img_paths, save_scores=True, load_scores=True):
     save_file_base = "brisque_scores"
 
     # ver_idx = 0
-    scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
+    scores = None
+    if load_scores:
+        scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
 
     if scores is None or len(scores) != len(img_paths):
         brisque_obj = get_brisque()
@@ -56,7 +58,8 @@ def compute_brisque_scores(paths_cfg, img_paths):
             scores.append(brisque_obj.score(img_tfd))
 
         # save scores after computation
-        save_results_versioned(paths_cfg, scores, save_file_base, save_method="npz")
+        if save_scores:
+            save_results_versioned(paths_cfg, scores, save_file_base, save_method="npz")
 
     return scores
 

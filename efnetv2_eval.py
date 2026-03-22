@@ -28,12 +28,13 @@ RECOMPUTE = True
 OVERRIDE = True
 
 
-def compute_efnetv2_similarities(paths_cfg, img_paths, batch_size=32, use_gpu=False):
+def compute_efnetv2_similarities(paths_cfg, img_paths, batch_size=32, use_gpu=False, save_scores=True, load_scores=True):
     save_file_base = "efnetv2_scores"
 
-    # # ver_idx = 0
-    # efnetv2_scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
+    # ver_idx = 0
     efnetv2_scores = None
+    if load_scores:
+        efnetv2_scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
 
     if efnetv2_scores is None or len(efnetv2_scores) != len(img_paths):
 
@@ -88,7 +89,8 @@ def compute_efnetv2_similarities(paths_cfg, img_paths, batch_size=32, use_gpu=Fa
                 efnetv2_scores[i, j] = (1 - cos_dist) * 100
 
         # save scores after computation
-        save_results_versioned(paths_cfg, efnetv2_scores, save_file_base, save_method="npz")
+        if save_scores:
+            save_results_versioned(paths_cfg, efnetv2_scores, save_file_base, save_method="npz")
 
     return efnetv2_scores
 
@@ -280,15 +282,14 @@ if __name__ == "__main__":
         "results_root": RESULTS_ROOT
     }
 
-    # measuring times for batching influence on speed
-    batch_sizes = [1, 2, 16, 32, 64]
-    for b_size in batch_sizes:
-        start_t = time.time()
-        compute_efnetv2_similarities(paths_cfg, img_paths, batch_size=b_size)
-        end_t = time.time()
-        time_diff = end_t-start_t
-        print(f"B {b_size}: {time_diff:.4f}")
-    exit()
+    # # measuring times for batching influence on speed
+    # batch_sizes = [1, 2, 16, 32, 64]
+    # for b_size in batch_sizes:
+    #     start_t = time.time()
+    #     compute_efnetv2_similarities(paths_cfg, img_paths, batch_size=b_size, load_scores=False, save_scores=False)
+    #     end_t = time.time()
+    #     time_diff = end_t-start_t
+    #     print(f"B {b_size}: {time_diff:.4f}")
 
     scores = []
     viewer = ImageViewer(img_paths, scores, mode='dual', tool_name=method_name)

@@ -27,8 +27,8 @@ from utils import save_results_versioned, load_results_versioned, remove_all_fil
 
 DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
 # DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/full/"
-# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/grenoble/full/"
+# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/full/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/grenoble/full/"
 # DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/namibie/namibie_corrected/"
 
 RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
@@ -36,10 +36,13 @@ IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
 MAX_IMAGES = None
 
+EDIT_CLUSTERS = False
+SAVE_CLUSTERS = True
+
 DISPLAY_GRID_HEIGHT = 3
 DISPLAY_GRID_WIDTH = 5
 
-CLUSTER_DIFF_THR = 10.0    # [s]
+CLUSTER_DIFF_THR = 20.0    # [s]
 CLUSTER_MAX_MULT = 2  # Include a new photo in the cluster if its time difference
                        # is max x times bigger than the biggest in the cluster
 NEIGHBORS_RANGE = 15  # range of the scope for similar photos search, ex. range = 10 -> 19 neighbors
@@ -92,7 +95,6 @@ def on_key(event):
     else:
         user_text += event.key
     print("\rCurrent input:", user_text, end="", flush=True)
-
 
 
 def parse_input(user_input):
@@ -278,7 +280,7 @@ def get_cluster_window_indices(cluster, n_images):
 
 
 # create clusters manually aided by the time-wise cluster suggestions
-def create_man_clusters(img_paths, thr=10.0, max_mult=2.0):
+def create_man_clusters(img_paths, thr=10.0, max_mult=2.0, previous_clusters=None):
     print("------------------------------------------------")
     print("|         Welcome to Clusters editor!!         |")
     print("------------------------------------------------")
@@ -290,6 +292,14 @@ def create_man_clusters(img_paths, thr=10.0, max_mult=2.0):
     print("|   '[0,1],[2,4]' = split the cluster          |")
     print("| >>> First image in cluster has idx 0! <<<    |")
     print("------------------------------------------------")
+
+    if previous_clusters:
+        new_clusters = []
+        for cluster in previous_clusters:
+            if is_new_cl(cluster, new_clusters):
+                print(f"Cluster: {cluster}")
+                clusters_editor(cluster, new_clusters, img_paths)
+        return new_clusters
 
     photo_times = []
     for img_path in img_paths:
@@ -393,12 +403,28 @@ if __name__ == "__main__":
         "results_root": RESULTS_ROOT
     }
 
-    img_clusters = create_man_clusters(img_paths, thr=CLUSTER_DIFF_THR, max_mult=CLUSTER_MAX_MULT)
+    # enable additional clusters checking and editing
+    if not EDIT_CLUSTERS:
+        prev_clusters = None
+    else:
+        # load the cluster data for comparison
+        data_r = load_results_versioned(paths_cfg, "clusters_manual", load_method="json")
+        prev_clusters = [json.loads(cluster) for cluster in data_r["clusters"]]
+        # if "image_refs" in data_r:
+        #     img_paths_pairs = []
+        #     for pair_str in data_r["image_refs"]:
+        #         name, idx = pair_str.split(",")
+        #         img_paths_pairs.append((name.strip(), int(idx)))
+        #     img_paths = [dataset_path / p for p, _ in sorted(img_paths_pairs, key=lambda x: x[1])]
+
+    img_clusters = create_man_clusters(img_paths, thr=CLUSTER_DIFF_THR, max_mult=CLUSTER_MAX_MULT, previous_clusters=prev_clusters)
     data = {
         "clusters":     [str(cluster) for cluster in img_clusters],  # for better json formatting
         "image_refs":   [f"{img_path.name}, {i}" for i, img_path in enumerate(img_paths)]
     }
-    save_results_versioned(paths_cfg, data, "clusters_manual_v2", save_method="json")
+
+    if SAVE_CLUSTERS:
+        save_results_versioned(paths_cfg, data, "clusters_manual_v3", save_method="json")
 
 
     # # additional cluster checking

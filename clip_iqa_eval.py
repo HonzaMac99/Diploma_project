@@ -10,11 +10,11 @@ from torchmetrics.multimodal.clip_iqa import CLIPImageQualityAssessment
 from utils import *
 
 DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/full/"
 RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
-MAX_IMAGES = 10 # maximum number of images to process (for debugging)
+MAX_IMAGES = None # maximum number of images to process (for debugging)
 N_NEIGHBORS = 20
 IMG_NUM_RES = 1    # orig_res = [3000 x 4000] --> [224, 244] (fixed nima input size)
 
@@ -34,11 +34,13 @@ def get_clip():
     return _clip_obj
 
 
-def compute_clip_scores(paths_cfg, img_paths):
+def compute_clip_scores(paths_cfg, img_paths, save_scores=True, load_scores=True):
     save_file_base = "clip-iqa_scores"
 
     # ver_idx = 0
-    scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
+    scores = None
+    if load_scores:
+        scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
 
     if scores is None or len(scores) != len(img_paths):
         clip_obj = get_clip()
@@ -50,11 +52,7 @@ def compute_clip_scores(paths_cfg, img_paths):
             img = ImageOps.exif_transpose(img)  # apply EXIF orientation
             img = np.array(img)
 
-            dsampl_lvl = 3  # 1 -> 6s; 2 -> 1.65s; 3 -> 0.5s; 4 -> 0.16s per image
-            img_new_h = img.shape[0] // 2 ** dsampl_lvl
-            img_new_w = img.shape[1] // 2 ** dsampl_lvl
-            img_norm = img.astype(np.float32) / 255.0 # torch.tensor(img) / 255.0
-            img_tfd = skimage.transform.resize_local_mean(img_norm, output_shape=[img_new_h, img_new_w])
+            img_tfd = img_resize(img, max_d=1024, tf_option=1) # using cv2.resize()
 
             # note: local mean is the simplest method that KEEPS STATISTICS, so the IQA is more or less unbiased
             # we don't use cv2.resize, because interpolation can create artifacts and bias the img statistics
@@ -65,7 +63,8 @@ def compute_clip_scores(paths_cfg, img_paths):
             scores.append(clip_score)
 
         # save scores after computation
-        save_results_versioned(paths_cfg, scores, save_file_base, save_method="npz")
+        if save_scores:
+            save_results_versioned(paths_cfg, scores, save_file_base, save_method="npz")
 
     return scores
 

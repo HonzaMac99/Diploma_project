@@ -30,12 +30,13 @@ RECOMPUTE = True
 OVERRIDE = True
 
 
-def compute_clip_similarities(paths_cfg, img_paths, batch_size=32, cuda=True):
+def compute_clip_similarities(paths_cfg, img_paths, batch_size=32, cuda=True, save_scores=True, load_scores=True):
     save_file_base = "clip_scores"
 
-    # # ver_idx = 0
-    # clip_scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
+    # ver_idx = 0
     clip_scores = None
+    if load_scores:
+        clip_scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
 
     if clip_scores is None or len(clip_scores) != len(img_paths):
 
@@ -48,7 +49,7 @@ def compute_clip_similarities(paths_cfg, img_paths, batch_size=32, cuda=True):
         with torch.no_grad():
             for img_path in tqdm(img_paths, desc="CLIP contents", unit="img"):
 
-                img = Image.open(img_path)
+                img = Image.open(img_path).convert("RGB")
                 img_tfd = preprocess(img)
                 batch.append(img_tfd)
 
@@ -83,7 +84,8 @@ def compute_clip_similarities(paths_cfg, img_paths, batch_size=32, cuda=True):
                     simil_mtx[i, j] = contents[i] @ contents[j]
 
         # save scores after computation
-        save_results_versioned(paths_cfg, simil_mtx, save_file_base, save_method="npz")
+        if save_scores:
+            save_results_versioned(paths_cfg, simil_mtx, save_file_base, save_method="npz")
 
     return simil_mtx
 
@@ -279,7 +281,7 @@ if __name__ == "__main__":
     batch_sizes = [1, 2, 16, 32, 64]
     for b_size in batch_sizes:
         start_t = time.time()
-        compute_efnetv2_similarities(paths_cfg, img_paths, batch_size=b_size)
+        compute_clip_similarities(paths_cfg, img_paths, batch_size=b_size, load_scores=False, save_scores=False)
         end_t = time.time()
         time_diff = end_t-start_t
         print(f"B {b_size}: {time_diff:.4f}")

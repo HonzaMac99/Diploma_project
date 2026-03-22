@@ -17,8 +17,8 @@ from clip_eval import compute_clip_similarities
 
 DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
 # DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/full/"
-# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/grenoble/full/"
+# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/full/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/grenoble/full/"
 # DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/namibie/namibie_corrected/"
 
 RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
@@ -156,7 +156,7 @@ def clusters_editor(new_cluster, clusters, image_paths):
 
 # todo: make it universal for any clusters?
 # create clusters manually aided by the time-wise cluster suggestions
-def create_man_clusters(img_paths, thr=10.0, max_mult=2.0):
+def create_man_clusters(img_paths, thr=10.0, max_mult=2.0, edit_previous=False):
     print("------------------------------------------------")
     print("|         Welcome to Clusters editor!!         |")
     print("------------------------------------------------")
@@ -596,7 +596,7 @@ if __name__ == "__main__":
         method_clusters = [json.loads(cluster) for cluster in data_r["clusters"]]
         list_of_img_clusters.append(method_clusters)
 
-    # compare the clusters from each method with manual
+    # Evaluation: compare the clusters from each method with manual
     method_tps = [0] * len(list_of_img_clusters)
     total_pairs = 0
     nb_range = NEIGHBORS_RANGE

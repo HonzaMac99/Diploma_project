@@ -20,8 +20,15 @@ import hashlib
 
 # region image handling
 
-# reduce the size of the image so that the longer dimension is max_d long
 def img_resize(img, max_d=1024, tf_option=1):
+    """
+    reduce the size of the image so that the longer dimension is max_d long
+
+    :param img:       loaded image with NO tf except rotation correction
+    :param max_d:     length of the longer dimension in pixels
+    :param tf_option: 1 = cv2 (speed), 2 = skimage (quality)
+    :return:          resized image
+    """
     img_norm = img.astype(np.float32) / 255.0
     img_h, img_w = img.shape[:2]
 
@@ -62,8 +69,8 @@ def img_resize(img, max_d=1024, tf_option=1):
 
 def save_results_versioned(paths_cfg, results, file_name_base, save_method="json", override_last=True):
     """
-    Prepare a directory for a dataset located under a common dataset root.
-    Dir name corresponding to the dataset is derived from the relative path, ex.: coco/train2017/ -> coco_train2017
+    Prepare a directory for a dataset located under a common dataset root. Dir name corresponding to the dataset
+    is derived from the relative path, ex.: tid2013/distorted_images/ -> tid2013_distorted_images/
     """
     dataset_root = Path(paths_cfg["dataset_root"]).expanduser().resolve()
     dataset_path = Path(paths_cfg["dataset_path"]).expanduser().resolve()
@@ -122,8 +129,10 @@ def save_results_versioned(paths_cfg, results, file_name_base, save_method="json
 
 def load_results_versioned(paths_cfg, file_name_base, ver_idx=None, load_method="json"):
     """
-    Load scores for a dataset and tool. Dataset directory name is derived from the relative path to dataset_root,
-    capped to last 3 components, plus a full-path hash.
+    Load previously saved scores for any method. Dataset directory name is derived from the
+    relative path to dataset_root, capped to last 3 components.
+
+    optional: add a full path hash to the dir name, but maybe overkill
     """
     dataset_path = Path(paths_cfg["dataset_path"]).expanduser().resolve()
     dataset_root = Path(paths_cfg["dataset_root"]).expanduser().resolve()
@@ -171,8 +180,8 @@ def load_results_versioned(paths_cfg, file_name_base, ver_idx=None, load_method=
         return data
     elif load_method == "npz":
         data = np.load(results_path)
-        # convert to normal dict if you want
-        results = {k: data[k] for k in data.files}
+        # results = {k: data[k] for k in data.files} # convert to normal dict
+
         scores = data["scores"]
         return scores
     else:
