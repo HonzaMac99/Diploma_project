@@ -3,28 +3,17 @@
 ## Scripts overview
 
 **photo_select.py** [in dedicated development] - general prototype for photo selection  \
-**photo_eval.py** - script for displaying scores of all methods with visualized image(s) \
-**\<method\>_eval.py** - script with individual method evaluation \
-**\<method\>_train.py** - script for retraining models of methods using neural networks \
-&nbsp;&nbsp; *available methods: 
-BRISQUE [[1]](#ref1), 
-NIMA [[2]](#ref2), 
-SIFT [[3]](#ref3),
-EfficientNetV2 [[4]](#ref4), 
-CLIP [[5]](#ref5), 
-CLIP-IQA [[6]](#ref6)
-
+**photo_eval.py** - script for displaying scores of all methods* with visualized images \
+**methods/** - scripts for individual methods* evaluation and training (if they use neural networks) \
 **create_man_clusters.py** - interactive tool for manual cluster annotations (see [description](#man_cl))  \
-**dataset_loader.py** - loads and vizualizes all colected [datasets](#datasets) 
-
-### Other scirpts for inspiration or testing
-
-nima_train_example.py \
-piaa-tvc_eval.py 
-
-display_selection.py \
-testing_sel.py \
-test_histograms.py
+**dataset_loader.py** - loads and vizualizes all colected [datasets](#datasets) \
+*available methods:
+BRISQUE [[1]](#ref1),
+NIMA [[2]](#ref2),
+SIFT [[3]](#ref3),
+EfficientNetV2 [[4]](#ref4),
+CLIP [[5]](#ref5),
+CLIP-IQA [[6]](#ref6)
 
 ## Interactive viewer
 After the computation, a viewer of the selected images or individual photos and their scores is automaticly turned on.
@@ -34,7 +23,8 @@ you can navigate the second image with 'w' and 's'. You can quit by pressing 'q'
 <a id="man_cl"></a>
 ## Interactive manual cluster annotations
 
-In the script **create_man_clusters_v3.py** (or earlier versions) you can design your own cluster annotations! 
+In the newest script **create_man_clusters_v3.py** you can design your own cluster annotations! 
+Why more versions? So you can try them all! 
 You can follow the guide displayed after starting the script or you can get inspired here:
 
     ------------------------------------------------
@@ -49,7 +39,7 @@ You can follow the guide displayed after starting the script or you can get insp
 
 ## General parameters 
 
-To adjust the behavior of the scripts to your liking, there is a set of predefined parameters: 
+To adjust the behavior of individual scripts to your liking, there is a set of predefined parameters: 
 
 DATASET_ROOT - root of the datasets (important for saving results) \
 DATASET_PATH - path to the selected dataset \

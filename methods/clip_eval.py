@@ -90,7 +90,7 @@ def compute_clip_similarities(paths_cfg, img_paths, batch_size=32, cuda=True, sa
     return simil_mtx
 
 
-# region Other experimental functions
+# region other experimental functions
 
 # inspired by LB
 def compute_contents(img, model):
@@ -144,7 +144,7 @@ def compute_imgs_contents(target_path, recompute=False, target_res=240):
     return dataset_stats, times_compute
 
 # inspired by LB
-def compute_similarities(img_paths, n_neighbors):
+def compute_clip_similarities_exp(img_paths, n_neighbors):
     global viewer
     plt.ion()
 
@@ -301,7 +301,7 @@ if __name__ == "__main__":
         print_scores(method_stats)
         viewer.scores = get_scores_json(method_stats)
     else:
-        method_stats = compute_similarities(img_paths, N_NEIGHBORS)
+        method_stats = compute_clip_similarities_exp(img_paths, N_NEIGHBORS)
         if SAVE_STATS:
             save_path = save_results_versioned(paths_cfg, method_stats, file_name_base, save_method="json",
                                                override_last=OVERRIDE)

@@ -29,24 +29,10 @@ RECOMPUTE = True
 
 # OVERRIDE = True
 
-
 # -----------------
 # download links:
 # -----------------
-# aadb          https://github.com/aimerykong/deepImageAestheticsAnalysis?tab=readme-ov-file
-# ava           https://www.kaggle.com/datasets/nicolacarrassi/ava-aesthetic-visual-assessment?resource=download
-# flickr-aes    https://drive.google.com/drive/folders/1LR6trJhN4XbgTtqZo1zfe272cAkXqA7e
-# grenoble      --private collection--
-# kaohsiung     --private collection--
-# koniq10k      https://database.mmsp-kn.de/koniq-10k-database.html
-# live-itw      https://live.ece.utexas.edu/research/ChallengeDB/index.html
-# namibie       --private collection--
-# para          https://web.xidian.edu.cn/ldli/en/dataset.html (you need to get password from Yuzhe Yang)
-# real-cur      -- download with flickr-aes --
-# spaq (!)      https://github.com/h4nwei/SPAQ?tab=readme-ov-file
-# tad66k        https://github.com/woshidandan/TANet-image-aesthetics-and-quality-assessment?tab=readme-ov-file 
-# (tid2013)     https://www.kaggle.com/datasets/maindolaamit/tid2013
-
+# see README.md
 # todo: try to get SPAQ from Baidu (google drive is unavailable) -> Baidu requires chinese phone number for registration
 
 # ----------
@@ -85,7 +71,7 @@ dataset_img_dirs = {
 dataset_data_files = {
     "aadb"          : "result_csv.csv",                                                             # scores 1-5 (5 AMT)
     "ava"           : "ground_truth_dataset.csv",                                                   # distr. 0-1 (for 0-10 ratings, NIMA style)
-    "flickr-aes"    : "FLICKR-AES_image_score.txt", # orig fname starts with " " !!                 # scores 0-1 (5 AMT, zscores)
+    "flickr-aes"    : "FLICKR-AES_image_score.txt", # orig fnames start with one whitespace!!       # scores 0-1 (5 AMT, zscores)
     # "flickr-aes"    : "FLICKR-AES-001/FLICKR-AES_image_labeled_by_each_worker.csv",
     "grenoble"      : "",                                                                           # -- selection --
     "kaohsiung"     : "",                                                                           # -- selection --
@@ -163,14 +149,17 @@ def get_img_paths(dataset_path, dataset_name):
     )
     return img_paths
 
-# wrap dedicated dataset score loading functions into decorators
-SCORE_LOADERS = {}
 
+# decorator wrapper for dedicated dataset score loading functions
+SCORE_LOADERS = {}
 def score_loader(name):
+
     def decorator(fn):
         SCORE_LOADERS[name] = fn
         return fn
+
     return decorator
+
 
 @score_loader("aadb")
 def get_aadb_scores(input_path, output_path=Path("aadb_iqa_scores.csv")):

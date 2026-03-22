@@ -63,7 +63,7 @@ def compute_brisque_scores(paths_cfg, img_paths, save_scores=True, load_scores=T
 
     return scores
 
-# region Other experimental functions
+# region other experimental functions
 
 def brisque_eval(img):
     plt.ioff()
@@ -92,7 +92,8 @@ def brisque_eval(img):
     return b_scores_resls, times
 
 
-def compute_scores(img_paths):
+# experimental version
+def compute_brisque_scores_exp(img_paths):
     global viewer 
     plt.ion()
 
@@ -253,7 +254,7 @@ if __name__ == "__main__":
         print_scores(method_stats)
         viewer.img_paths, viewer.scores = get_scores_json(method_stats)
     else:
-        method_stats = compute_scores(img_paths)
+        method_stats = compute_brisque_scores_exp(img_paths)
         if SAVE_STATS:
             save_path = save_results_versioned(paths_cfg, method_stats, file_name_base, save_method="json",
                                                override_last=OVERRIDE)
