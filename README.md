@@ -7,14 +7,12 @@
 **\<method\>_eval.py** - script with individual method evaluation \
 **\<method\>_train.py** - script for retraining models of methods using neural networks \
 &nbsp;&nbsp; *available methods: 
-brisque [[1]](#ref1), 
-nima [[2]](#ref2), 
-sift [[3]](#ref3),
-efnetv2 [[4]](#ref4), 
-clip [[5]](#ref5), 
-clip_iqa [[6]](#ref6)
-brisque [1](#ref1), NIMA [2](#ref2), SIFT [3](#ref3), 
-EfficientNetV2 [4](#ref4), CLIP [5](#ref5), CLIP-IQA [6](#ref6)
+BRISQUE [[1]](#ref1), 
+NIMA [[2]](#ref2), 
+SIFT [[3]](#ref3),
+EfficientNetV2 [[4]](#ref4), 
+CLIP [[5]](#ref5), 
+CLIP-IQA [[6]](#ref6)
 
 **create_man_clusters.py** - interactive tool for manual cluster annotations (see [description](#man_cl))  \
 **dataset_loader.py** - loads and vizualizes all colected [datasets](#datasets) 
