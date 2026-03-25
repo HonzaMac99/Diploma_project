@@ -1,7 +1,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Rectangle
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageFile
+from torchmetrics.functional.clustering import normalized_mutual_info_score
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True  # ← must be before any Image.open() call
 from pathlib import Path
 import json
 from itertools import islice
@@ -12,32 +15,30 @@ from scipy.io import loadmat
 import shutil
 
 from utils import ImageViewer, load_results_versioned
-from nima_eval import compute_nima_scores
-from clip_iqa_eval import compute_clip_scores
+from methods.nima_eval import compute_nima_scores
+from methods.clip_iqa_eval import compute_clip_scores
 
 DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
+# DATASET_ROOT = "/datagrid/Medical/TEMPORARY/photos/macalik/datasets/"
+
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 
-MAX_IMAGES = None
+MAX_IMAGES = None # for debuging
+SAVE_SCORES = True
+LOAD_SCORES = True # set to false for recomputation
 
-SHOW_IMAGES = False
-SAVE_IMAGES = False
+SHOW_IMAGES = False # visualize the top,avg and worst rated images of each dataset after loading
+SAVE_IMAGES = False # save images for the report
 
 COMPUTE_F1 = True
 RECOMPUTE = True
 
-# OVERRIDE = True
+# todo #2: add loading also for the GT saved csv
+# todo #3: getting SPAQ from Baidu (google drive is unavailable) -> Baidu requires chinese phone number for registration
 
-# -----------------
-# download links:
-# -----------------
-# see README.md
-# todo: try to get SPAQ from Baidu (google drive is unavailable) -> Baidu requires chinese phone number for registration
+# for download links see README.md
 
-# ----------
-# notes:
-# ----------
 # [aadb] consists of flickr images, each is evaluated by 5 different AMTurk workers with scores 1-5
 # [flickr-aes, koniq10k] use 'zscore = (score - rater_mean) / rater_std' > this removes rater bias
 # [flickr-aes] the testing set have separate AMT workers from train set to simulate real world scenario
@@ -54,16 +55,17 @@ RECOMPUTE = True
 # for img_name, scores in sorted(image_scores.items(), key=lambda x: natural_key(x[0])):
 
 dataset_img_dirs = {
-    "aadb"          : "train/",
+    "aadb"          : "train/",     # all images in /test are in /train as well
     "ava"           : "images/",
     "flickr-aes"    : "FLICKR-AES-001/40K/",
     "grenoble"      : "full/",
     "kaohsiung"     : "full/",
     "koniq10k"      : "1024x768/",
     "live-itw"      : "Images/",
-    "namibie"       : "corrected/",
-    "para"          : "imgs/",
-    "real-cur"      : "",
+    "namibie"       : "originals/", # subdirs, only on remote
+    "para"          : "imgs/",      # subdirs
+    "real-cur"      : "",           # subdirs
+    # "spaq"          : "",
     "tad66k"        : "TAD66K/",
     "tid2013"       : "distorted_images/",
 }
@@ -79,20 +81,26 @@ dataset_data_files = {
     "live-itw"      : "Data/",                                                                      # scores 0-100
     "namibie"       : "",                                                                           # -- selection --
     "para"          : "annotation/PARA-Images.csv",                                                 # scores 1-5 (~25 AMT)
-    "real-cur"      : "",                                                                           # scores 1-5 (from the owners)
+    "real-cur"      : "",  # subdirs                                                                # scores 1-5 (from the owners)
+    # "spaq"          : "",
     "tad66k"        : "labels/merge/",                                                              # scores 0-10
     "tid2013"       : "mos.csv"                                                                     # scores 0-10 (max 7.2 though)
 }
 
+dataset_selelections_dirs = {
+    "grenoble"      : "selected_top10pct/",
+    "kaohsiung"     : "selected_top30pct/",
+    "namibie"       : "corrected/", # subdirs
+}
 
 def get_visible_dir_list(in_dir):
     return [p for p in in_dir.iterdir() if p.is_dir() and not (p.name.startswith(".") or p.name.startswith("_"))]
-
 
 def natural_key(path):
     name_s = path.name
     return [int(c) if c.isdigit() else c for c in re.split(r'(\d+)', name_s)]
 
+# region image assembling
 
 def get_para_img_paths(dataset_img_path):
     img_paths = []
@@ -149,6 +157,9 @@ def get_img_paths(dataset_path, dataset_name):
     )
     return img_paths
 
+# endregion
+
+# region scores
 
 # decorator wrapper for dedicated dataset score loading functions
 SCORE_LOADERS = {}
@@ -160,7 +171,6 @@ def score_loader(name):
 
     return decorator
 
-
 @score_loader("aadb")
 def get_aadb_scores(input_path, output_path=Path("aadb_iqa_scores.csv")):
     def parse(val):
@@ -169,8 +179,6 @@ def get_aadb_scores(input_path, output_path=Path("aadb_iqa_scores.csv")):
             return float({"Pos": "1", "Neg": "-1", "n": "0"}.get(clean, clean))
         except ValueError:
             return None
-
-    avg_scores = defaultdict(float)
 
     with open(input_path, encoding="utf-8") as f:
         lines = f.read().split("\n")
@@ -195,17 +203,22 @@ def get_aadb_scores(input_path, output_path=Path("aadb_iqa_scores.csv")):
 
                 image_scores[img_name].append(score)
 
+    avg_scores = defaultdict(float)
 
-    output_path.parent.mkdir(exist_ok=True)
-    with open(output_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["image_name", "mos"])
+    if SAVE_SCORES:
+        output_path.parent.mkdir(exist_ok=True)
+        with open(output_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["image_name", "score"])
 
+            for img_name, scores in sorted(image_scores.items()):
+                avg_scores[img_name] = round(sum(scores) / len(scores), 4) * 2
+                writer.writerow([img_name, avg_scores[img_name]])
+        print(f"Saved {len(image_scores)} image scores to '{output_path}'")
+    else:
         for img_name, scores in sorted(image_scores.items()):
             avg_scores[img_name] = round(sum(scores) / len(scores), 4) * 2
-            writer.writerow([img_name, avg_scores[img_name]])
 
-    print(f"Saved {len(image_scores)} image scores to '{output_path}'")
     return avg_scores
 
 @score_loader("ava")
@@ -219,14 +232,15 @@ def get_ava_scores(input_path, output_path=Path("ava_iqa_scores.csv")):
             avg_score = sum((i + 1) * float(row[v]) for i, v in enumerate(vote_cols))
             avg_scores[img_name] = round(avg_score, 4) * 10
 
-    output_path.parent.mkdir(exist_ok=True)
-    with open(output_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["image_name", "mos"])
-        for name, mos in sorted(avg_scores.items()):
-            writer.writerow([name, mos])
+    if SAVE_SCORES:
+        output_path.parent.mkdir(exist_ok=True)
+        with open(output_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["image_name", "score"])
+            for name, score in sorted(avg_scores.items()):
+                writer.writerow([name, score])
+        print(f"Saved {len(avg_scores)} image scores to '{output_path}'")
 
-    print(f"Saved {len(avg_scores)} image scores to '{output_path}'")
     return avg_scores
 
 @score_loader("flickr-aes")
@@ -236,12 +250,14 @@ def get_flickr_aes_scores(input_path, output_path=Path("flickr_aes_iqa_scores.cs
         with open(input_path, encoding="utf-8") as f:
             avg_scores = {row[0]: float(row[1]) for line in f if (row := line.split())}
 
-        output_path.parent.mkdir(exist_ok=True)
-        with open(output_path, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["image_name", "mos"])
-            for img_name, mos in sorted(avg_scores.items()):
-                writer.writerow([img_name, mos])
+        if SAVE_SCORES:
+            output_path.parent.mkdir(exist_ok=True)
+            with open(output_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["image_name", "score"])
+                for img_name, score in sorted(avg_scores.items()):
+                    writer.writerow([img_name, score])
+            print(f"Saved {len(avg_scores)} image scores to '{output_path}'")
 
     elif input_path.name == "FLICKR-AES_image_labeled_by_each_worker.csv":
         image_scores = defaultdict(list)
@@ -252,26 +268,76 @@ def get_flickr_aes_scores(input_path, output_path=Path("flickr_aes_iqa_scores.cs
                 if row := line.split():
                     image_scores[row[1]].append(float(row[2]))
 
-        output_path.parent.mkdir(exist_ok=True)
-        with open(output_path, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["image_name", "mos"])
+        if SAVE_SCORES:
+            output_path.parent.mkdir(exist_ok=True)
+            with open(output_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["image_name", "mos"])
+                for img_name, scores in sorted(image_scores.items()):
+                    avg_scores[img_name] = round(sum(scores) / len(scores), 4) * 2
+                    writer.writerow([img_name, avg_scores[img_name]])
+            print(f"Saved {len(avg_scores)} image scores to '{output_path}'")
+        else:
             for img_name, scores in sorted(image_scores.items()):
                 avg_scores[img_name] = round(sum(scores) / len(scores), 4) * 2
-                writer.writerow([img_name, avg_scores[img_name]])
 
-    print(f"Saved {len(avg_scores)} image scores to '{output_path}'")
     return avg_scores
 
 @score_loader("grenoble")
 def get_grenoble_scores(input_path, output_path=Path("grenoble_iqa_scores.csv")):
-    # Todo
-    ...
+
+    full_ds_path = input_path / "full"
+    selected_ds_path = input_path / dataset_selelections_dirs["grenoble"]
+
+    # scan dir with all images, set to 0
+    img_sel = {}
+    for img_path in full_ds_path.iterdir():
+        if img_path.is_file():
+            img_sel[img_path.name] = 0
+
+    # scan dir w selected images, set to 1 only if already in dict
+    for img_path in selected_ds_path.iterdir():
+        if img_path.is_file() and img_path.name in img_sel:
+            img_sel[img_path.name] = 1
+
+    if SAVE_SCORES:
+        output_path.parent.mkdir(exist_ok=True)
+        with open(output_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["image_name", "score"])
+            for name, score in sorted(img_sel.items()):
+                writer.writerow([name, score])
+        print(f"Saved {len(img_sel)} image scores to '{output_path}'")
+
+    return img_sel
 
 @score_loader("kaohsiung")
 def get_kaohsiung_scores(input_path, output_path=Path("kaohsiung_iqa_scores.csv")):
-    # Todo
-    ...
+
+    full_ds_path = input_path / "full"
+    selected_ds_path = input_path / dataset_selelections_dirs["kaohsiung"]
+
+    # scan dir with all images, set to 0
+    img_sel = {}
+    for img_path in full_ds_path.iterdir():
+        if img_path.is_file():
+            img_sel[img_path.name] = 0
+
+    # scan dir w selected images, set to 1 only if already in dict
+    for img_path in selected_ds_path.iterdir():
+        if img_path.is_file() and img_path.name in img_sel:
+            img_sel[img_path.name] = 1
+
+    if SAVE_SCORES:
+        output_path.parent.mkdir(exist_ok=True)
+        with open(output_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["image_name", "score"])
+            for name, score in sorted(img_sel.items()):
+                writer.writerow([name, score])
+        print(f"Saved {len(img_sel)} image scores to '{output_path}'")
+
+    return img_sel
 
 @score_loader("koniq10k")
 def get_koniq10k_scores(input_path, output_path=Path("koniq10k_iqa_scores.csv")):
@@ -282,18 +348,20 @@ def get_koniq10k_scores(input_path, output_path=Path("koniq10k_iqa_scores.csv"))
             for row in reader
         }
 
-    output_path.parent.mkdir(exist_ok=True)
-    with open(output_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["image_name", "mos"])
-        for img_name, mos in sorted(avg_scores.items()):
-            writer.writerow([img_name, mos])
+    if SAVE_SCORES:
+        output_path.parent.mkdir(exist_ok=True)
+        with open(output_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["image_name", "score"])
+            for img_name, score in sorted(avg_scores.items()):
+                writer.writerow([img_name, score])
+        print(f"Saved {len(avg_scores)} image scores to '{output_path}'")
 
-    print(f"Saved {len(avg_scores)} image scores to '{output_path}'")
     return avg_scores
 
 @score_loader("live-itw")
 def get_live_itw_scores(input_path, output_path=Path("live_itw_iqa_scores.csv")):
+
     images = loadmat(input_path / "AllImages_release.mat")["AllImages_release"]
     mos    = loadmat(input_path / "AllMOS_release.mat")["AllMOS_release"]
 
@@ -302,20 +370,44 @@ def get_live_itw_scores(input_path, output_path=Path("live_itw_iqa_scores.csv"))
 
     avg_scores = {name: round(score, 4) for name, score in zip(img_names, scores)}
 
-    output_path.parent.mkdir(exist_ok=True)
-    with open(output_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["image_name", "mos"])
-        for img_name, mos in sorted(avg_scores.items()):
-            writer.writerow([img_name, mos])
+    if SAVE_SCORES:
+        output_path.parent.mkdir(exist_ok=True)
+        with open(output_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["image_name", "score"])
+            for img_name, score in sorted(avg_scores.items()):
+                writer.writerow([img_name, score])
+        print(f"Saved {len(avg_scores)} image scores to '{output_path}'")
 
-    print(f"Saved {len(avg_scores)} image scores to '{output_path}'")
     return avg_scores
 
 @score_loader("namibie")
 def get_namibie_scores(input_path, output_path=Path("namibie_iqa_scores.csv")):
-    # Todo
-    ...
+
+    full_ds_path = input_path / "full"
+    selected_ds_path = input_path / dataset_selelections_dirs["namibie"]
+
+    # scan dir with all images, set to 0
+    img_sel = {}
+    for img_path in full_ds_path.rglob("*"): # using rglob for listing all subdirs
+        if img_path.is_file():
+            img_sel[img_path.name] = 0
+
+    # scan dir w selected images, set to 1 only if already in dict
+    for img_path in selected_ds_path.rglob("*"): # using rglob for listing all subdirs
+        if img_path.is_file() and img_path.name in img_sel:
+            img_sel[img_path.name] = 1
+
+    if SAVE_SCORES:
+        output_path.parent.mkdir(exist_ok=True)
+        with open(output_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["image_name", "score"])
+            for name, score in sorted(img_sel.items()):
+                writer.writerow([name, score])
+        print(f"Saved {len(img_sel)} image scores to '{output_path}'")
+
+    return img_sel
 
 @score_loader("para")
 def get_para_scores(input_path, output_path=Path("para_iqa_scores.csv")):
@@ -328,15 +420,19 @@ def get_para_scores(input_path, output_path=Path("para_iqa_scores.csv")):
             if row := line.split(","):
                 image_scores[row[1]].append(float(row[3]))
 
-    output_path.parent.mkdir(exist_ok=True)
-    with open(output_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["image_name", "mos"])
+    if SAVE_SCORES:
+        output_path.parent.mkdir(exist_ok=True)
+        with open(output_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["image_name", "score"])
+            for img_name, scores in sorted(image_scores.items()):
+                avg_scores[img_name] = round(sum(scores) / len(scores), 4)
+                writer.writerow([img_name, avg_scores[img_name]])
+        print(f"Saved {len(avg_scores)} image scores to '{output_path}'")
+    else:
         for img_name, scores in sorted(image_scores.items()):
             avg_scores[img_name] = round(sum(scores) / len(scores), 4)
-            writer.writerow([img_name, avg_scores[img_name]])
 
-    print(f"Saved {len(avg_scores)} image scores to '{output_path}'")
     return avg_scores
 
 @score_loader("real-cur")
@@ -349,7 +445,21 @@ def get_real_cur_scores(input_path, output_path=Path("real_cur_iqa_scores.csv"))
             for img_path in list(score_dir_path.iterdir()):
                 image_scores[str(img_path.name)] = image_score
 
+    if SAVE_SCORES:
+        output_path.parent.mkdir(exist_ok=True)
+        with open(output_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["image_name", "score"])
+            for img_name, scores in sorted(image_scores.items()):
+                writer.writerow([img_name, image_scores[img_name]])
+        print(f"Saved {len(image_scores)} image scores to '{output_path}'")
+
     return image_scores
+
+@score_loader("spaq")
+def get_spaq_scores(input_path, output_path=Path("tad66k_iqa_scores.csv")):
+    # Todo: obtain the dataset from Baidou somehow
+    ...
 
 @score_loader("tad66k")
 def get_tad66k_scores(input_path, output_path=Path("tad66k_iqa_scores.csv")):
@@ -369,16 +479,17 @@ def get_tad66k_scores(input_path, output_path=Path("tad66k_iqa_scores.csv")):
             row["image"]: float(row["score"])
             for row in reader
         }
-        avg_scores |= new_scores  # avg_scores.update(new_scores)
+        avg_scores |= new_scores  #  same as avg_scores.update(new_scores)
 
-    output_path.parent.mkdir(exist_ok=True)
-    with open(output_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["image_name", "mos"])
-        for img_name, mos in sorted(avg_scores.items()):
-            writer.writerow([img_name, mos])
+    if SAVE_SCORES:
+        output_path.parent.mkdir(exist_ok=True)
+        with open(output_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["image_name", "score"])
+            for img_name, score in sorted(avg_scores.items()):
+                writer.writerow([img_name, score])
+        print(f"Saved {len(avg_scores)} image scores to '{output_path}'")
 
-    print(f"Saved {len(avg_scores)} image scores to '{output_path}'")
     return avg_scores
 
 @score_loader("tid2013")
@@ -390,27 +501,31 @@ def get_tid2013_scores(input_path, output_path=Path("tid2013_iqa_scores.csv")):
             for row in reader
         }
 
-    output_path.parent.mkdir(exist_ok=True)
-    with open(output_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["image_name", "mos"])
-        for img_name, mos in sorted(avg_scores.items()):
-            writer.writerow([img_name, mos])
+    if SAVE_SCORES:
+        output_path.parent.mkdir(exist_ok=True)
+        with open(output_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["image_name", "score"])
+            for img_name, score in sorted(avg_scores.items()):
+                writer.writerow([img_name, score])
+        print(f"Saved {len(avg_scores)} image scores to '{output_path}'")
 
-    print(f"Saved {len(avg_scores)} image scores to '{output_path}'")
     return avg_scores
 
 
 def load_iqa_scores(path):
     print(f"Loading scores from: {path}")
     with open(path, newline="", encoding="utf-8") as f:
-        return {row["image_name"]: float(row["mos"]) for row in csv.DictReader(f)}
+        return {row["image_name"]: float(row["score"]) for row in csv.DictReader(f)}
 
 
-def get_dataset_scores(dataset_path, dataset_name, img_paths, **kwargs):
+def get_dataset_scores(dataset_path, dataset_name, img_paths, n_imgs=None, **kwargs):
+
     data_file_path = dataset_path / dataset_data_files[dataset_name]
-    output_file_path = dataset_path / "my_calc/aes_scores.csv"
-    # output_file_path = dataset_path / f"{dataset_name}_iqa_scores.csv"
+
+    # save path - for no saving set SAVE_SCORES = False
+    output_file = "my_calc/aes_scores.csv" if n_imgs is None else f"my_calc/aes_scores_{n_imgs}.csv"
+    output_file_path = dataset_path / output_file
 
     if not RECOMPUTE and output_file_path.is_file():
         img_scores = load_iqa_scores(output_file_path)
@@ -435,6 +550,7 @@ def get_dataset_scores(dataset_path, dataset_name, img_paths, **kwargs):
     print(f"{len(img_paths)} images, {len(img_paths)-n_no_scores} scores, {n_no_scores} with no score")
     return scores, img_paths
 
+# endregion
 
 def calc_f1(predicted_ids, ground_truth_ids):
     predicted_set = set(predicted_ids)
@@ -454,8 +570,9 @@ def calc_f1(predicted_ids, ground_truth_ids):
 if __name__ == "__main__":
 
     # dataset_names = ["aadb", "ava", "flickr-aes", "grenoble", "kaohsiung", "koniq10k", "live-itw", "namibie", "para", "real-cur", "tad66k", "tid2013"]
-    dataset_names = ["aadb", "ava", "flickr-aes", "koniq10k", "live-itw", "para", "real-cur", "tad66k", "tid2013"]
-    # dataset_names = ["real-cur", "para"]
+    dataset_names = ["aadb", "ava", "flickr-aes", "grenoble", "kaohsiung", "koniq10k", "live-itw", "para", "real-cur", "tad66k", "tid2013"]
+    # dataset_names ["grenoble", "kaohsiung"]
+    # dataset_names ["real-cur"]
 
     for dataset_name in dataset_names:
         print("----------------------")
@@ -464,7 +581,7 @@ if __name__ == "__main__":
 
         dataset_path = Path(DATASET_ROOT) / dataset_name
         img_paths = get_img_paths(dataset_path, dataset_name)
-        scores, img_paths = get_dataset_scores(dataset_path, dataset_name, img_paths)
+        scores, img_paths = get_dataset_scores(dataset_path, dataset_name, img_paths, n_imgs=MAX_IMAGES)
 
         if scores is None:
             scores = [0] * len(img_paths)
@@ -514,7 +631,7 @@ if __name__ == "__main__":
                             shutil.copy(img_path, dst_path)
                             print(f"Saved {dst_path}")
 
-        # compare NIMA, CLIP and ... score based ranking with GT on 50%, 20%, 10%, 5%, 2%, 1% top selections - use F1 score
+        # compute NIMA and CLIP  F1 score based on top 50%, 20%, 10%, 5%, 2%, 1% selections
         if COMPUTE_F1:
             paths_cfg = {
                 "dataset_root": DATASET_ROOT,
@@ -526,23 +643,31 @@ if __name__ == "__main__":
             sorted_img_paths = sorted_img_paths[:last_score_idx]
             scores = scores[:last_score_idx]
 
-            nima_scores = compute_nima_scores(paths_cfg, sorted_img_paths, save_scores=True, load_scores=True)
+            # brisque_scores = compute_brisque_scores(paths_cfg, sorted_img_paths, save_scores=SAVE_SCORES, load_scores=LOAD_SCORES)
+            # sorted_pairs = sorted(zip(sorted_img_paths, nima_scores), key=lambda x: x[1], reverse=True)
+            # brisque_img_paths, scores = map(list, zip(*sorted_pairs))
+
+            nima_scores = compute_nima_scores(paths_cfg, sorted_img_paths, save_scores=SAVE_SCORES, load_scores=LOAD_SCORES)
             sorted_pairs = sorted(zip(sorted_img_paths, nima_scores), key=lambda x: x[1], reverse=True)
             nima_img_paths, scores = map(list, zip(*sorted_pairs))
 
-            clip_scores = compute_clip_scores(paths_cfg, sorted_img_paths, save_scores=True, load_scores=True)
+            clip_scores = compute_clip_scores(paths_cfg, sorted_img_paths, save_scores=SAVE_SCORES, load_scores=LOAD_SCORES)
             sorted_pairs = sorted(zip(sorted_img_paths, clip_scores), key=lambda x: x[1], reverse=True)
             clip_iqa_img_paths, scores = map(list, zip(*sorted_pairs))
 
             top_splits = [2, 5, 10, 20, 50, 100]
             for top_split in top_splits:
-                top_k = last_score_idx/top_split
+                top_k = last_score_idx // top_split
+                print(f"Selection of top {top_k} / {last_score_idx}")
 
-                nima_f1 = calc_f1(nima_img_paths[:top_k], sorted_img_paths[:top_k])
-                clip_iqa_f1 = calc_f1(clip_iqa_img_paths[:top_k], sorted_img_paths[:top_k])
+                # brisque_clas_metrics = calc_f1(brisque_img_paths[:top_k], sorted_img_paths[:top_k])
+                nima_clas_metrics = calc_f1(nima_img_paths[:top_k], sorted_img_paths[:top_k])
+                clip_iqa_clas_metrics = calc_f1(clip_iqa_img_paths[:top_k], sorted_img_paths[:top_k])
 
-                print(f"NIMA F1 for {100/top_split}% is {nima_f1}")
-                print(f"CLIP-IQA F1 for {100/top_split}% is {clip_iqa_f1}")
+                # print(f"  BRISQUE  F1 for {100 / top_split}% is {brisque_clas_metrics["f1"]}, TP: {brisque_clas_metrics["tp"]}")
+                print(f"  NIMA     F1 for {100 / top_split}% is {nima_clas_metrics["f1"]}, TP: {nima_clas_metrics["tp"]}")
+                print(f"  CLIP-IQA F1 for {100 / top_split}% is {clip_iqa_clas_metrics["f1"]}, TP: {clip_iqa_clas_metrics["tp"]}")
+                print("")
 
         # assert len(sorted_img_paths) == len(scores), "Number of images is different than number of scores!"
         # viewer = ImageViewer(sorted_img_paths, scores=scores, mode='single', tool_name=dataset_name)

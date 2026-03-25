@@ -5,6 +5,8 @@ from tqdm import tqdm
 
 import torchvision.models as models
 import torchvision.transforms as transforms
+from torch.utils.data import Dataset, DataLoader
+
 
 from utils import *
 
@@ -44,9 +46,34 @@ class NIMA(nn.Module):
         out = out_f.view(out_f.size(0), -1)
         out = self.classifier(out)
         return out_f, out
+    
+    
+class NIMADataset(Dataset):
+    def __init__(self, img_paths, transform):
+        self.img_paths = img_paths
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.img_paths)
+
+    def __getitem__(self, idx):
+        try:
+            img = Image.open(self.img_paths[idx]).convert("RGB")
+            img = ImageOps.exif_transpose(img)
+            return self.transform(img)
+        except Exception as e:
+            print(f"Skipping corrupted image: {self.img_paths[idx]} — {e}")
+            return None
 
 
-def build_nima_model(weights_path: Path, cuda: bool = True, seed: int | None = None):
+def collate_skip_none(batch):
+    batch = [img for img in batch if img is not None]
+    if not batch:
+        return None
+    return torch.stack(batch)
+
+
+def build_nima_model(weights_path, cuda=True, seed=None):
     """
     Loads NIMA model with pretrained VGG16 base and returns it on the proper device.
     """
@@ -77,7 +104,7 @@ def get_nima_model():
 
 
 def process_nima_batch(batch, model, device, indices):
-    imgs = torch.stack(batch).to(device) # imgs: [B, C, H, W]
+    imgs = batch.to(device)  # imgs [B, C, H, W] from DataLoader
 
     with torch.no_grad():
         _, out_batch_classes = model(imgs)  # [B, 10]
@@ -99,43 +126,35 @@ def compute_nima_scores(paths_cfg, img_paths, batch_size = 32, cuda=True, save_s
     if scores is None or len(scores) != len(img_paths):
         nima_model = get_nima_model()
         device = torch.device("cuda" if torch.cuda.is_available() and cuda else "cpu")
-
         nima_img_transform = transforms.Compose([
             transforms.Resize(256),
-            # transforms.RandomCrop(224),           # Resize and crop (as in paper)
-            transforms.CenterCrop(224),           # center crop for same scores
-            transforms.ToTensor(),                # Convert to tensor and scale [0,255] -> [0,1]
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225])
         ])
 
+        dataset = NIMADataset(img_paths, nima_img_transform)
+        loader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            num_workers=8,  # parallel CPU workers for loading/transforms
+            pin_memory=True,  # faster CPU->GPU transfers
+            prefetch_factor=2,  # prefetch batches ahead of time
+            collate_fn=collate_skip_none,
+        )
+
+        indices = torch.arange(1, 11, device=device).float()
         scores = []
-        batch = []
-        indices = torch.arange(1, 11, device=device).float()  # class indices: 1..10
 
-        for img_path in tqdm(img_paths, desc="NIMA", unit="img"):
-
-            img = Image.open(img_path).convert("RGB")
-            img = ImageOps.exif_transpose(img)  # apply EXIF orientation
-
-            img = nima_img_transform(img)  # transform for Nima
-            batch.append(img)
-
-            if len(batch) == batch_size:
-                with torch.no_grad():
-                    batch_scores = process_nima_batch(batch, nima_model, device, indices)
-                    scores.extend(batch_scores)
-                    batch.clear()
-
-        # last partial batch
-        if batch:
-            batch_scores = process_nima_batch(batch, nima_model, device, indices)
-            scores.extend(batch_scores)
+        for batch in tqdm(loader, desc="NIMA", unit="img", unit_scale=batch_size):
+            with torch.no_grad():
+                batch_scores = process_nima_batch(batch, nima_model, device, indices)
+                scores.extend(batch_scores)
 
         # save scores after computation
         if save_scores:
             save_results_versioned(paths_cfg, scores, save_file_base, save_method="npz")
-
     return scores
 
 # region Other experimental functions

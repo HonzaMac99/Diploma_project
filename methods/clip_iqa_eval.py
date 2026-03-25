@@ -5,6 +5,7 @@ import skimage
 
 from torch import randint
 from torchvision import transforms
+from torch.utils.data import Dataset, DataLoader
 from torchmetrics.multimodal.clip_iqa import CLIPImageQualityAssessment
 
 from utils import *
@@ -17,6 +18,7 @@ IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 MAX_IMAGES = None # maximum number of images to process (for debugging)
 N_NEIGHBORS = 20
 IMG_NUM_RES = 1    # orig_res = [3000 x 4000] --> [224, 244] (fixed nima input size)
+CLIP_RES = 512 # 1024
 
 SHOW_IMAGES = True
 SAVE_SCORE_EXIF = False
@@ -34,40 +36,75 @@ def get_clip():
     return _clip_obj
 
 
-def compute_clip_scores(paths_cfg, img_paths, save_scores=True, load_scores=True):
+class CLIPDataset(Dataset):
+    def __init__(self, img_paths, max_dim):
+        self.img_paths = img_paths
+        self.max_dim = max_dim
+        # self.transform = transforms.ToTensor()
+        self.transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Resize((224, 224)), # ensuring fixed size for batch stacking
+        ])
+
+    def __len__(self):
+        return len(self.img_paths)
+
+    def __getitem__(self, idx):
+        try:
+            img = Image.open(self.img_paths[idx]).convert("RGB")
+            img = ImageOps.exif_transpose(img)
+            img = np.array(img)
+            img = img_resize(img, max_d=self.max_dim, tf_option=1)
+            return self.transform(img)
+        except Exception as e:
+            print(f"Skipping corrupted image: {self.img_paths[idx]} — {e}")
+            return None
+
+
+def collate_skip_none(batch):
+    batch = [img for img in batch if img is not None]
+    if not batch:
+        return None
+    return torch.stack(batch)
+
+
+def compute_clip_scores(paths_cfg, img_paths, cuda=True, max_dim=None, batch_size=64, save_scores=True, load_scores=True):
     save_file_base = "clip-iqa_scores"
 
-    # ver_idx = 0
     scores = None
     if load_scores:
         scores = load_results_versioned(paths_cfg, save_file_base, load_method="npz")
 
+    device = torch.device("cuda" if torch.cuda.is_available() and cuda else "cpu")
+
     if scores is None or len(scores) != len(img_paths):
-        clip_obj = get_clip()
-        transform = transforms.ToTensor()
+        clip_obj = get_clip().to(device)
+        max_dim = max_dim if max_dim is not None else CLIP_RES
+
+        dataset = CLIPDataset(img_paths, max_dim)
+        loader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            num_workers=8,
+            pin_memory=True,
+            prefetch_factor=2,
+            collate_fn=collate_skip_none,
+        )
+
         scores = []
+        clip_obj.eval()
+        for batch in tqdm(loader, desc="CLIP-IQA", unit="img", unit_scale=batch_size):
+            if batch is None:
+                continue
+            with torch.no_grad():
+                batch = batch.to(device)
+                clip_score = clip_obj(batch)
+                scores.extend(clip_score.cpu().tolist())
 
-        for img_path in tqdm(img_paths, desc="CLIP-IQA", unit="img"):
-            img = Image.open(img_path)
-            img = ImageOps.exif_transpose(img)  # apply EXIF orientation
-            img = np.array(img)
-
-            img_tfd = img_resize(img, max_d=1024, tf_option=1) # using cv2.resize()
-
-            # note: local mean is the simplest method that KEEPS STATISTICS, so the IQA is more or less unbiased
-            # we don't use cv2.resize, because interpolation can create artifacts and bias the img statistics
-            # --> from experiments turned out that the effect is negligible
-
-            img_tfd = transform(img_tfd).unsqueeze(0) # tf to [C, W, H] and then to [B, C, W, H], float32, [0, 1]
-            clip_score = clip_obj(img_tfd)
-            scores.append(clip_score)
-
-        # save scores after computation
         if save_scores:
             save_results_versioned(paths_cfg, scores, save_file_base, save_method="npz")
 
     return scores
-
 
 if __name__ == "__main__":
     method_name = "Clip-iqa"

@@ -12,8 +12,8 @@ from collections import defaultdict
 import json
 
 from utils import save_results_versioned, load_results_versioned, remove_all_files_by_name, img_resize
-from sift_eval import compute_sift_similarities
-from clip_eval import compute_clip_similarities
+from methods.sift_eval import compute_sift_similarities
+from methods.clip_eval import compute_clip_similarities
 
 DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
 # DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"

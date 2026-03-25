@@ -177,11 +177,13 @@ def load_results_versioned(paths_cfg, file_name_base, ver_idx=None, load_method=
     if load_method == "json":
         with open(results_path, "r", encoding="utf-8") as f:
             data = json.load(f)
+        print(f"Loaded data from {results_path}")
         return data
     elif load_method == "npz":
         data = np.load(results_path)
         # results = {k: data[k] for k in data.files} # convert to normal dict
 
+        print(f"Loaded data from {results_path}")
         scores = data["scores"]
         return scores
     else:
@@ -433,8 +435,10 @@ class ImageViewer:
     # ----------------------------
     # Selection rendering with colored frames depicting the selection
     # ----------------------------
-    def show_selection(self, interactive=False):
-        start_idx = (self.idx1 * 16) % self.n_images # self.idx1 is now idx of the frame with 16 images
+    def show_selection(self, interactive=False, start_idx=None):
+
+        if start_idx is None:
+            start_idx = (self.idx1 * 16) % self.n_images # self.idx1 is now idx of the frame with 16 images
 
         self.clear_texts()
 

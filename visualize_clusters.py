@@ -1,13 +1,3 @@
-# Interactive manual cluster creation
-#
-# Usage (type text into the plot window):
-#   Enter         = keep the cluster
-#   'x', '[]'     = don't keep the cluster
-#   'b', 'back'   = join previous cluster
-#   '[-1, 0, 3]'  = edit the selection
-#   '[0,1],[2,4]' = split the cluster
-# >>> First image in cluster has idx 0! <<<
-
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
@@ -42,7 +32,7 @@ DISPLAY_GRID_WIDTH = 5
 
 CLUSTER_DIFF_THR = 20.0    # [s]
 CLUSTER_MAX_MULT = 2  # Include a new photo in the cluster if its time difference
-                       # is max x times bigger than the biggest in the cluster
+# is max x times bigger than the biggest in the cluster
 NEIGHBORS_RANGE = 15  # range of the scope for similar photos search, ex. range = 10 -> 19 neighbors
 
 # v3: Gap-browsing pass added — photos not visible in any time-based cluster window
@@ -207,8 +197,8 @@ def show_cluster(cluster, clusters, img_paths):
                   ha='center', fontsize=14, fontweight='bold', family="monospace"
                   )
     t2 = fig.text(0.5, 0.06, f"New cluster: {cluster}",
-                       ha='center', fontsize=14, fontweight='bold'
-                       )
+                  ha='center', fontsize=14, fontweight='bold'
+                  )
     t3 = fig.text(0.5, 0.03, "(Type in the window to edit)",
                   ha='center', fontsize=14, fontweight='bold'
                   )
@@ -406,7 +396,10 @@ if __name__ == "__main__":
         prev_clusters = None
     else:
         # load the cluster data for comparison
-        data_r = load_results_versioned(paths_cfg, "clusters_manual", load_method="json")
+        # file_name = "clusters_manual"
+        # file_name = "clusters_sift"
+        file_name = "clusters_clip"
+        data_r = load_results_versioned(paths_cfg, file_name, load_method="json")
         prev_clusters = [json.loads(cluster) for cluster in data_r["clusters"]]
         # if "image_refs" in data_r:
         #     img_paths_pairs = []

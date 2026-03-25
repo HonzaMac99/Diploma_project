@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageFile
 import cv2
 import torch, clip
 
@@ -12,8 +12,8 @@ from collections import defaultdict
 import json
 
 from utils import save_results_versioned, load_results_versioned, remove_all_files_by_name, img_resize
-from sift_eval import compute_sift_similarities
-from clip_eval import compute_clip_similarities
+from methods.sift_eval import compute_sift_similarities
+from methods.clip_eval import compute_clip_similarities
 
 DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
 # DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
@@ -271,8 +271,13 @@ def create_time_clusters(img_paths, thr=10.0, max_mult=2.0):
 
 # region histogram clusters
 
-def calc_color_hist(img_path, method='hsv'):
+def calc_color_hist(img_path, method='hsv', max_dim=None):
     img = cv2.imread(img_path)
+    if img is None:
+        ImageFile.LOAD_TRUNCATED_IMAGES = True
+        pil_img = Image.open(img_path).convert("RGB")
+        img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+
     if method == "hsv":    # calc. 2D histogram from [hue, saturation] with 50x60 bins and [0, 180, 0, 256] ranges
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         hist = cv2.calcHist([hsv], [0, 1], None, [50, 60], [0, 180, 0, 256])

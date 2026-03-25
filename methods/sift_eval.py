@@ -9,11 +9,12 @@ DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/full/"
 RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
-MAX_IMAGES = None # [int|None] maximum number of images to process (for debugging)
+MAX_IMAGES = 150 # [int|None] maximum number of images to process (for debugging)
 N_NEIGHBORS = 20
 N_SIFT_FEATS = 1000
 IMG_NUM_RES = 1 # 5  # 4096, 2048, 1024, 512, 256
 SIFT_RES = 1024
+SIFT_THR = 0.6
 
 SHOW_IMAGES = False
 SAVE_SCORE_EXIF = False
@@ -226,8 +227,8 @@ def compute_similarities(img_paths, n_neighbors):
                     viewer.idx2 = j
                     viewer.show_current(interactive=False)
 
-                thr = 0.7
-                if sift_score > thr:
+                # if [i, j] in [[141, 142], [142, 143]]:
+                if sift_score > SIFT_THR:
                     show_matches(i, j, img_paths, keypoints, matches, max_dim_len)
 
         avg_time_detect = sum(times_detect) / len(times_detect)
