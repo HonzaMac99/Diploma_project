@@ -1,18 +1,17 @@
-1b) Počítat clustery, nastavit vhodné prahy
-3) Sift udělat rozlišení a časy
 5) fine tuning existujících sítí na našich a dalších datasetech
 6) Integrace všeho do aplikace z přikazove řádky - důraz na jednoduchost použití, use cases
 =====================================================================
 
 Side quests:
-e) sepsat rozlišení obrázků
-d) napsat README s detailním návodem použití
 
+
+Resolutions:
 # Brisque:  256, 512, 1024, 2048, 4096 | longer edge max len, aspect ratio
 # Nima:     224                        | both
 # Sift:     256, 512, 1024, 2048, 4096 | longer edge max len, aspect ratio
 # Efnetv2:  240                        | both
-
+# Clip      224                        | default resolution 224
+# Clip-iqa  224                        | default resolution 224
 
 Done:
 1) EfficientNetv2b1 integration - content similarity computation and display
@@ -23,4 +22,7 @@ c) základní ukládání výsledků: dataset/path/to/photos/ --> path_to_photos
 4) Celkova uprava kodu, udělat vse vic MODULARNI (15h??)
 2b) stahnout AVA dataset (?)
 4b) integrovan CLIP, dalsi to go
-
+e) sepsat rozlišení obrázků
+d) napsat README s detailním návodem použití
+1b) Počítat clustery, nastavit vhodné prahy
+3) Sift udělat rozlišení a časy

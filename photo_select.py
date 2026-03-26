@@ -16,23 +16,23 @@ from torchmetrics.functional.clustering import normalized_mutual_info_score
 
 from utils import *
 
-from brisque_eval import compute_brisque_scores
-from nima_eval import compute_nima_scores
-from sift_eval import compute_sift_similarities
-from efnetv2_eval import compute_efnetv2_similarities
+from methods.brisque_eval import compute_brisque_scores
+from methods.nima_eval import compute_nima_scores
+from methods.sift_eval import compute_sift_similarities
+from methods.efnetv2_eval import compute_efnetv2_similarities
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 DATASET_ROOT = "/home/honzamac/Edu/m5/Projekt_D/datasets/"
-# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/selected_r30/"
-DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/jk/namibie_corrected/"
+DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/kaohsiung/full/"
+# DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/jk/namibie_corrected/"
 # DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/LIVEwild/Images/trainingImages/"
 # DATASET_PATH = "/home/honzamac/Edu/m5/Projekt_D/datasets/tid2013/distorted_images"
 
 RESULTS_ROOT = "/home/honzamac/Edu/m5/Projekt_D/projekt_testing/results/"
 IMG_EXTS = {".bmp", ".png", ".jpg", ".jpeg"}
 
-MAX_IMAGES = 100
+MAX_IMAGES = 100 # None
 SAVE_SCORE_EXIF = False
 DEF_THRESHOLD = 0.5
 

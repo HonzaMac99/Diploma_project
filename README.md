@@ -1,3 +1,12 @@
+### ⚠️ Repository Moved
+
+This repository has been moved to GitLab and is no longer maintained here.
+
+**New location:** [project-name](https://gitlab.com/username/project-name)
+```bash
+git remote set-url origin https://gitlab.com/username/project-name.git
+```
+
 # How to use
 
 ## Scripts overview
@@ -46,7 +55,7 @@ DATASET_PATH - path to the selected dataset \
 RESULTS_ROOT - path to the common results folder \
 IMG_EXTS - allowed image extentions to be processed 
 
-MAX_IMAGES [int|None] - maximum number of images to process (for debugging), None = no maximum \
+MAX_IMAGES [int|None] - maximum number of images to process (for debugging), None = no limit \
 N_NEIGHBORS - number of neighbors to include in the similarity computation \
 IMG_NUM_RES - number of different image resolutions (for testing) \
 \<method\>_RES - default resolution for the method 
