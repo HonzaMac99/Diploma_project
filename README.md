@@ -2,7 +2,7 @@
 
 This repository has been moved to GitLab and is no longer maintained here.
 
-**New location:** [project-name](https://gitlab.com/username/project-name)
+**New location:** [project-name](https://gitlab.fel.cvut.cz/macaljan/Diploma_project)
 ```bash
 git remote set-url origin https://gitlab.com/username/project-name.git
 ```
